@@ -1,0 +1,15 @@
+{
+  "name": "logtap-sdk",
+  "version": "0.1.0",
+  "description": "logtap browser/node logging + tracking SDK",
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "sideEffects": false
+}

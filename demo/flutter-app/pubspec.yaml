@@ -1,0 +1,21 @@
+name: logtap_flutter_demo
+description: logtap flutter demo app (web)
+version: 0.1.0+1
+publish_to: none
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  logtap_flutter:
+    path: ../../sdks/flutter/logtap_flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+

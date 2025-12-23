@@ -1,0 +1,14 @@
+bin/
+dist/
+node_modules/
+*.exe
+.DS_Store
+data/geoip/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.metadata
+build/

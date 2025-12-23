@@ -1,0 +1,40 @@
+version: "3"
+
+tasks:
+  auth:secret:
+    desc: Generate AUTH_SECRET (base64, >= 32 bytes)
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/gen-auth-secret.ps1
+
+  geoip:download:
+    desc: Download MaxMind GeoLite2 mmdb (requires MAXMIND_LICENSE_KEY)
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/download-geoip.ps1
+
+  run:
+    desc: "Run gateway (defaults: local PG, remote NSQ)"
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-gateway.ps1
+
+  run:build:
+    desc: Build then run gateway.exe
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-gateway.ps1 -Build
+
+  ui:install:
+    desc: Install console deps (Bun)
+    dir: web
+    cmds:
+      - bun install
+
+  ui:dev:
+    desc: Run console dev server
+    dir: web
+    cmds:
+      - bun run dev
+
+  ui:build:
+    desc: Build console
+    dir: web
+    cmds:
+      - bun run build

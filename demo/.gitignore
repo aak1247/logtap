@@ -1,0 +1,16 @@
+# Node / logs
+node_modules/
+*.log
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+.metadata
+
+# IDE
+.idea/
+.vscode/
+

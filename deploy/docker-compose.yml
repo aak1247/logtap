@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: timescale/timescaledb:2.16.1-pg16
+    environment:
+      POSTGRES_USER: logtap
+      POSTGRES_PASSWORD: logtap
+      POSTGRES_DB: logtap
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  nsqlookupd:
+    image: nsqio/nsq:v1.2.1
+    command: /nsqlookupd
+    ports:
+      - "4160:4160"
+      - "4161:4161"
+
+  nsqd:
+    image: nsqio/nsq:v1.2.1
+    command: /nsqd --lookupd-tcp-address=nsqlookupd:4160 --broadcast-address=nsqd
+    depends_on:
+      - nsqlookupd
+    ports:
+      - "4150:4150"
+      - "4151:4151"
+
+  nsqadmin:
+    image: nsqio/nsq:v1.2.1
+    command: /nsqadmin --lookupd-http-address=nsqlookupd:4161
+    depends_on:
+      - nsqlookupd
+    ports:
+      - "4171:4171"
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: deploy/gateway/Dockerfile
+    environment:
+      HTTP_ADDR: ":8080"
+      NSQD_ADDRESS: "nsqd:4150"
+      POSTGRES_URL: "postgres://logtap:logtap@postgres:5432/logtap?sslmode=disable"
+      RUN_CONSUMERS: "true"
+    depends_on:
+      - postgres
+      - nsqd
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata: {}

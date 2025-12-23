@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>logtap Browser Demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>logtap Browser Demo</h1>
+      <p class="muted">
+        需要先启动网关（默认 <code>http://localhost:8080</code>），然后点击「初始化」再发送日志/事件。
+      </p>
+
+      <section class="card">
+        <h2>配置</h2>
+        <div class="grid">
+          <label>
+            Base URL
+            <input id="baseUrl" placeholder="http://localhost:8080" />
+          </label>
+          <label>
+            Project ID
+            <input id="projectId" placeholder="1" />
+          </label>
+          <label>
+            Project Key（可选）
+            <input id="projectKey" placeholder="pk_xxx" />
+          </label>
+          <label class="row">
+            <input id="gzip" type="checkbox" />
+            gzip（浏览器需要 CompressionStream）
+          </label>
+        </div>
+        <div class="actions">
+          <button id="init">初始化</button>
+          <button id="flush" class="secondary" disabled>flush</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>发送</h2>
+        <div class="actions">
+          <button id="sendInfo" disabled>发送 info 日志</button>
+          <button id="sendError" disabled>发送 error 日志</button>
+          <button id="sendTrack" disabled>发送 event（track）</button>
+        </div>
+        <div class="actions">
+          <button id="throw" class="danger" disabled>制造 window.error</button>
+          <button id="reject" class="danger" disabled>制造 unhandledrejection</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>输出</h2>
+        <pre id="out" class="out"></pre>
+      </section>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
+
