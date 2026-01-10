@@ -38,3 +38,29 @@ tasks:
     dir: web
     cmds:
       - bun run build
+
+  docker:build:
+    desc: "Build Docker image (default: aak1247/logtap:latest)"
+    cmds:
+      - docker build -f deploy/logtap/Dockerfile -t {{.IMG}}:{{.TAG}} .
+    vars:
+      TAG:
+        sh: bash -c "echo ${TAG:-latest}"
+      IMG:
+        sh: bash -c "echo ${IMG:-aak1247/logtap}"
+
+  docker:push:
+    desc: "Push Docker image (default: aak1247/logtap:latest)"
+    cmds:
+      - docker push {{.IMG}}:{{.TAG}}
+    vars:
+      TAG:
+        sh: bash -c "echo ${TAG:-latest}"
+      IMG:
+        sh: bash -c "echo ${IMG:-aak1247/logtap}"
+
+  docker:build:push:
+    desc: "Build and push Docker image (default: aak1247/logtap:latest)"
+    cmds:
+      - task: docker:build
+      - task: docker:push

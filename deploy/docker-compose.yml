@@ -40,10 +40,10 @@ services:
     ports:
       - "4171:4171"
 
-  gateway:
+  logtap:
     build:
       context: ..
-      dockerfile: deploy/gateway/Dockerfile
+      dockerfile: logtap/Dockerfile
     environment:
       HTTP_ADDR: ":8080"
       NSQD_ADDRESS: "nsqd:4150"
