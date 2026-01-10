@@ -45,7 +45,6 @@ services:
       context: ..
       dockerfile: logtap/Dockerfile
     environment:
-      HTTP_ADDR: ":8080"
       NSQD_ADDRESS: "nsqd:4150"
       POSTGRES_URL: "postgres://logtap:logtap@postgres:5432/logtap?sslmode=disable"
       RUN_CONSUMERS: "true"
