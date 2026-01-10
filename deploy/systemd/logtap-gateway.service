@@ -1,0 +1,19 @@
+[Unit]
+Description=logtap gateway (Sentry + logs)
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/logtap/gateway.env
+ExecStart=/opt/logtap/gateway
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/tmp
+
+[Install]
+WantedBy=multi-user.target
+
