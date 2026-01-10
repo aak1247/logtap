@@ -1,6 +1,9 @@
 # Build stage for Go backend
 FROM golang:1.22 AS go-build
 WORKDIR /src
+# Configure Go proxy for China
+ENV GOPROXY=https://goproxy.cn,https://goproxy.io,direct \
+    GO111MODULE=on
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
@@ -9,6 +12,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o
 # Build stage for frontend
 FROM oven/bun:1 AS web-build
 WORKDIR /web
+# Configure npm registry for China
+ENV npm_config_registry=https://registry.npmmirror.com
 COPY web/package.json web/bun.lock ./
 RUN bun install
 COPY web/ ./
