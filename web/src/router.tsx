@@ -9,6 +9,7 @@ import { LogsPage } from "./ui/pages/LogsPage";
 import { LoginPage } from "./ui/pages/LoginPage";
 import { ProjectsPage } from "./ui/pages/ProjectsPage";
 import { BootstrapPage } from "./ui/pages/BootstrapPage";
+import { DocsPage } from "./ui/pages/DocsPage";
 import { loadSettings } from "./lib/storage";
 
 function RequireAuth(props: { children: ReactNode }) {
@@ -20,6 +21,7 @@ function RequireAuth(props: { children: ReactNode }) {
 export const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
   { path: "/bootstrap", element: <BootstrapPage /> },
+  { path: "/docs/*", element: <DocsPage /> },
   {
     path: "/",
     element: (

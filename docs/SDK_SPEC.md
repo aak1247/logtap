@@ -1,6 +1,6 @@
 # SDK 统一能力与接口（Browser/Node、Go、Flutter）
 
-本文件描述 logtap 各端 SDK 的统一能力清单与对外接口（方法/配置项）的约定；上报 HTTP 接口与数据模型见 `docs/INGEST.md`。
+本文件描述 logtap 各端 SDK 的统一能力清单与对外接口（方法/配置项）的约定；上报 HTTP 接口与数据模型见 `./INGEST.md`。
 
 ## 统一能力（各端尽量对齐）
 
@@ -65,4 +65,3 @@
 - Node：`captureNodeErrors()`
 - Go：panic 捕获 helper（可选）
 - Flutter：`captureFlutterErrors()`（可选）
-

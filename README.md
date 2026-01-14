@@ -149,6 +149,7 @@ bun run dev
 
 浏览器打开：`http://localhost:5173`
 
+- 内置文档页：`/docs`（部署/集成/SDK 说明）
 - 右上角「设置」里填 `API Base`（例如 `http://localhost:8080`）
 - 登录模式下：先去 `/login` 登录，再到「项目」页选择项目并查看项目 Key（用于上报）
 - 未启用登录（未设置 `AUTH_SECRET`）时：可在 `/login` 选择「无需登录（开发模式）」或在「设置」里填 `Project ID`

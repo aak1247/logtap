@@ -62,6 +62,9 @@ export function RootLayout() {
               >
                 日志
               </NavLink>
+              <Link to="/docs" className={navItem}>
+                文档
+              </Link>
             </nav>
             <SettingsPanel />
           </div>

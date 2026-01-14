@@ -2,8 +2,8 @@
 
 logtap 提供三端上报 SDK，用于向网关上报「结构化日志」与「埋点/事件」。
 
-- 上报接口与数据模型：`docs/INGEST.md`
-- SDK 能力/接口统一约定：`docs/SDK_SPEC.md`
+- 上报接口与数据模型：`./INGEST.md`
+- SDK 能力/接口统一约定：`./SDK_SPEC.md`
 
 ## 共同配置
 
@@ -88,4 +88,3 @@ client.track("signup", {"from": "landing"});
 
 await client.close();
 ```
-
