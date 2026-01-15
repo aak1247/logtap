@@ -88,7 +88,15 @@ export function SettingsPanel() {
           <label className="block text-xs text-zinc-400">API Base</label>
           <input
             value={apiBase}
-            onChange={(e) => setApiBase(e.target.value)}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setApiBase(raw);
+              const base = raw.trim().replace(/\/+$/, "");
+              if (settings.apiBase === base) return;
+              const next = { ...settings, apiBase: base };
+              setSettings(next);
+              saveSettings(next);
+            }}
             placeholder="http://localhost:8080"
             className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
           />
@@ -253,6 +261,7 @@ export function SettingsPanel() {
                 className="text-xs text-zinc-400 hover:text-zinc-200"
                 onClick={() => {
                   const s = loadSettings();
+                  setSettings(s);
                   setApiBase(s.apiBase);
                 }}
               >

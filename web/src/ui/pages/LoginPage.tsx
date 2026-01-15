@@ -68,7 +68,13 @@ export function LoginPage() {
         <label className="block text-xs text-zinc-400">API Base</label>
         <input
           value={apiBase}
-          onChange={(e) => setApiBase(e.target.value)}
+          onChange={(e) => {
+            const raw = e.target.value;
+            setApiBase(raw);
+            const base = raw.trim().replace(/\/+$/, "");
+            const s = loadSettings();
+            if (s.apiBase !== base) saveSettings({ ...s, apiBase: base });
+          }}
           placeholder="http://localhost:8080"
           className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
         />
