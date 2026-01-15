@@ -41,10 +41,10 @@ COPY --from=web-build /web/dist /usr/share/nginx/html
 
 # Create directory for nginx temp files
 RUN mkdir -p /tmp/nginx && \
+    mkdir -p /var/log/supervisor /var/run && \
     chown -R nginx:nginx /usr/share/nginx/html && \
     chown -R nginx:nginx /tmp/nginx && \
     chmod +x /gateway
 
 EXPOSE 8080
 ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisor.d/supervisord.conf"]
-
