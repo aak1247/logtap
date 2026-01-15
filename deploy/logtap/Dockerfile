@@ -11,13 +11,14 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o
 
 # Build stage for frontend
 FROM node:22-alpine AS web-build
-WORKDIR /web
+WORKDIR /repo
 # Configure npm registry for China
 ENV npm_config_registry=https://registry.npmmirror.com
-COPY web/package.json ./
-RUN npm install --include=dev --no-audit --no-fund
-COPY web/ ./
-RUN npm run build
+COPY web/package.json web/package.json
+RUN cd web && npm install --include=dev --no-audit --no-fund
+COPY web/ web/
+COPY docs/ docs/
+RUN cd web && npm run build
 
 # Final stage with nginx + supervisord
 FROM alpine:3.19
@@ -37,7 +38,7 @@ COPY deploy/logtap/supervisord.conf /etc/supervisor.d/supervisord.conf
 COPY --from=go-build /out/gateway /gateway
 
 # Copy frontend build
-COPY --from=web-build /web/dist /usr/share/nginx/html
+COPY --from=web-build /repo/web/dist /usr/share/nginx/html
 
 # Create directory for nginx temp files
 RUN mkdir -p /tmp/nginx && \

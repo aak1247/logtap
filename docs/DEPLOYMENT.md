@@ -28,6 +28,8 @@ docker compose up --build
 
 `docker-compose.yml` 已包含：TimescaleDB、Redis、NSQ（lookupd/nsqd/admin）与 logtap 网关。
 
+说明：控制台构建会在打包时读取仓库根目录下的 `docs/` Markdown（用于内置文档页），所以 Docker 构建阶段会一并拷贝 `docs/`。
+
 ## 2) 无 Docker（服务器/生产）
 
 ### 2.1 构建网关
