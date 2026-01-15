@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { Navigate, createBrowserRouter } from "react-router-dom";
 import { RootLayout } from "./ui/RootLayout";
 import { DashboardPage } from "./ui/pages/DashboardPage";
@@ -10,10 +10,10 @@ import { LoginPage } from "./ui/pages/LoginPage";
 import { ProjectsPage } from "./ui/pages/ProjectsPage";
 import { BootstrapPage } from "./ui/pages/BootstrapPage";
 import { DocsPage } from "./ui/pages/DocsPage";
-import { loadSettings } from "./lib/storage";
+import { loadSettings, subscribeSettingsChange } from "./lib/storage";
 
 function RequireAuth(props: { children: ReactNode }) {
-  const s = loadSettings();
+  const s = useSyncExternalStore(subscribeSettingsChange, loadSettings, loadSettings);
   if (!s.token) return <Navigate to="/login" replace />;
   return <>{props.children}</>;
 }

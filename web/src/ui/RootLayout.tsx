@@ -1,13 +1,14 @@
+import { useSyncExternalStore } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { loadSettings } from "../lib/storage";
+import { loadSettings, subscribeSettingsChange } from "../lib/storage";
 
 const navItem =
   "px-3 py-2 rounded-md text-sm text-zinc-300 hover:text-zinc-100 hover:bg-zinc-900";
 const navItemActive = "bg-zinc-900 text-zinc-100";
 
 export function RootLayout() {
-  const s = loadSettings();
+  const s = useSyncExternalStore(subscribeSettingsChange, loadSettings, loadSettings);
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 border-b border-zinc-900 bg-zinc-950/90 backdrop-blur">
