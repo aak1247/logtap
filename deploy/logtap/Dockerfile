@@ -10,14 +10,14 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/gateway ./cmd/gateway
 
 # Build stage for frontend
-FROM oven/bun:1 AS web-build
+FROM node:22-alpine AS web-build
 WORKDIR /web
 # Configure npm registry for China
 ENV npm_config_registry=https://registry.npmmirror.com
-COPY web/package.json web/bun.lock ./
-RUN bun install
+COPY web/package.json ./
+RUN npm install --include=dev --no-audit --no-fund
 COPY web/ ./
-RUN bun run build
+RUN npm run build
 
 # Final stage with nginx + supervisord
 FROM alpine:3.19

@@ -147,6 +147,14 @@ bun install
 bun run dev
 ```
 
+如果你的环境（尤其是老 CPU / 某些 CI）运行 Bun 会遇到 `SIGILL / Illegal instruction`（缺少 AVX），可改用 Node/NPM：
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
 浏览器打开：`http://localhost:5173`
 
 - 内置文档页：`/docs`（部署/集成/SDK 说明）

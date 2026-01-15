@@ -78,12 +78,28 @@ bun install
 bun run dev
 ```
 
+如果 Bun 在你的环境（尤其是老 CPU / 某些 CI）会出现 `SIGILL / Illegal instruction`（缺少 AVX），可改用 Node/NPM：
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
 生产构建（静态资源）：
 
 ```bash
 cd web
 bun install
 bun run build
+```
+
+或：
+
+```bash
+cd web
+npm install
+npm run build
 ```
 
 构建产物在 `web/dist/`，可用 Nginx/静态托管服务部署。
@@ -93,4 +109,3 @@ bun run build
 - 反向代理：用 Nginx/Traefik 提供 HTTPS，并把 `/api/` 反代到网关
 - 数据持久化：Postgres 数据盘、NSQ（可按需做高可用）与日志保留策略
 - 资源隔离：消费者写库与网关可拆开部署（不同进程/不同实例）
-
