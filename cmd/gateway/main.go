@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/aak1247/logtap/internal/metrics"
 	"github.com/aak1247/logtap/internal/migrate"
 	"github.com/aak1247/logtap/internal/queue"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -39,7 +41,9 @@ func main() {
 
 	var gdb *gorm.DB
 	if cfg.PostgresURL != "" {
-		d, err := db.NewGorm(ctx, cfg.PostgresURL)
+		readyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		d, err := waitForPostgres(readyCtx, cfg.PostgresURL)
+		cancel()
 		if err != nil {
 			log.Fatalf("db: %v", err)
 		}
@@ -60,16 +64,12 @@ func main() {
 
 	var recorder *metrics.RedisRecorder
 	if cfg.EnableMetrics {
-		rdb, err := metrics.NewRedisClient(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
+		readyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		rdb, err := waitForRedis(readyCtx, cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
+		cancel()
 		if err != nil {
 			log.Fatalf("redis: %v", err)
 		}
-		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		if err := rdb.Ping(pingCtx).Err(); err != nil {
-			cancel()
-			log.Fatalf("redis ping: %v", err)
-		}
-		cancel()
 		defer rdb.Close()
 		recorder = metrics.NewRedisRecorder(rdb)
 	}
@@ -90,11 +90,11 @@ func main() {
 		if gdb == nil {
 			log.Fatalf("POSTGRES_URL required when RUN_CONSUMERS=true")
 		}
-		eventConsumer, err = consumer.NewNSQEventConsumer(cfg, gdb, recorder, geoip)
+		eventConsumer, err = consumer.NewNSQEventConsumer(ctx, cfg, gdb, recorder, geoip)
 		if err != nil {
 			log.Fatalf("event consumer: %v", err)
 		}
-		logConsumer, err = consumer.NewNSQLogConsumer(cfg, gdb, recorder)
+		logConsumer, err = consumer.NewNSQLogConsumer(ctx, cfg, gdb, recorder)
 		if err != nil {
 			log.Fatalf("log consumer: %v", err)
 		}
@@ -126,5 +126,69 @@ func main() {
 	if cfg.RunConsumers {
 		eventConsumer.Stop()
 		logConsumer.Stop()
+	}
+}
+
+func waitForPostgres(ctx context.Context, postgresURL string) (*gorm.DB, error) {
+	const maxDelay = 5 * time.Second
+	delay := 300 * time.Millisecond
+	var lastErr error
+	for {
+		d, err := db.NewGorm(ctx, postgresURL)
+		if err == nil {
+			return d, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("postgres not ready: %w (last error: %v)", ctx.Err(), lastErr)
+		}
+		log.Printf("postgres not ready: %v; retrying in %s", lastErr, delay)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("postgres not ready: %w (last error: %v)", ctx.Err(), lastErr)
+		case <-timer.C:
+		}
+		delay *= 2
+		if delay > maxDelay {
+			delay = maxDelay
+		}
+	}
+}
+
+func waitForRedis(ctx context.Context, addr, password string, dbIndex int) (*redis.Client, error) {
+	const maxDelay = 5 * time.Second
+	delay := 300 * time.Millisecond
+	var lastErr error
+	for {
+		rdb, err := metrics.NewRedisClient(addr, password, dbIndex)
+		if err == nil {
+			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			lastErr = rdb.Ping(pingCtx).Err()
+			cancel()
+			if lastErr == nil {
+				return rdb, nil
+			}
+			_ = rdb.Close()
+		} else {
+			lastErr = err
+		}
+
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("redis not ready: %w (last error: %v)", ctx.Err(), lastErr)
+		}
+		log.Printf("redis not ready: %v; retrying in %s", lastErr, delay)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("redis not ready: %w (last error: %v)", ctx.Err(), lastErr)
+		case <-timer.C:
+		}
+		delay *= 2
+		if delay > maxDelay {
+			delay = maxDelay
+		}
 	}
 }

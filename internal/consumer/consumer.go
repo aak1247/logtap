@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -22,20 +23,20 @@ type NSQConsumer struct {
 	consumer *nsq.Consumer
 }
 
-func NewNSQEventConsumer(cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder, geoip *enrich.GeoIP) (*NSQConsumer, error) {
+func NewNSQEventConsumer(ctx context.Context, cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder, geoip *enrich.GeoIP) (*NSQConsumer, error) {
 	channel := cfg.NSQEventChannel
 	if channel == "" {
 		channel = "event-consumer"
 	}
-	return newConsumer(cfg, "events", channel, handleEventMessage(db, recorder, geoip))
+	return newConsumer(ctx, cfg, "events", channel, handleEventMessage(db, recorder, geoip))
 }
 
-func NewNSQLogConsumer(cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder) (*NSQConsumer, error) {
+func NewNSQLogConsumer(ctx context.Context, cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder) (*NSQConsumer, error) {
 	channel := cfg.NSQLogChannel
 	if channel == "" {
 		channel = "log-consumer"
 	}
-	return newConsumer(cfg, "logs", channel, handleLogMessage(db, recorder))
+	return newConsumer(ctx, cfg, "logs", channel, handleLogMessage(db, recorder))
 }
 
 func (c *NSQConsumer) Stop() {
@@ -46,7 +47,7 @@ func (c *NSQConsumer) Stop() {
 	<-c.consumer.StopChan
 }
 
-func newConsumer(cfg config.Config, topic, channel string, handler nsq.HandlerFunc) (*NSQConsumer, error) {
+func newConsumer(ctx context.Context, cfg config.Config, topic, channel string, handler nsq.HandlerFunc) (*NSQConsumer, error) {
 	nsqCfg := nsq.NewConfig()
 	nsqCfg.MaxInFlight = 200
 	nsqCfg.MsgTimeout = 30 * time.Second
@@ -57,11 +58,45 @@ func newConsumer(cfg config.Config, topic, channel string, handler nsq.HandlerFu
 	cons.SetLogger(log.New(log.Writer(), "nsq ", log.LstdFlags), nsq.LogLevelInfo)
 	cons.AddHandler(handler)
 
-	if err := cons.ConnectToNSQD(cfg.NSQDAddress); err != nil {
+	if err := connectToNSQDWithRetry(ctx, cons, cfg.NSQDAddress, topic, channel); err != nil {
 		cons.Stop()
 		return nil, err
 	}
 	return &NSQConsumer{consumer: cons}, nil
+}
+
+func connectToNSQDWithRetry(ctx context.Context, cons *nsq.Consumer, addr, topic, channel string) error {
+	const (
+		totalWait = 2 * time.Minute
+		maxDelay  = 5 * time.Second
+	)
+	deadline := time.Now().Add(totalWait)
+	delay := 300 * time.Millisecond
+	var lastErr error
+
+	for {
+		err := cons.ConnectToNSQD(addr)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			return fmt.Errorf("connect nsqd addr=%s topic=%s channel=%s: %w", addr, topic, channel, lastErr)
+		}
+		log.Printf("nsq connect failed (addr=%s topic=%s channel=%s): %v; retrying in %s", addr, topic, channel, lastErr, delay)
+
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+		delay *= 2
+		if delay > maxDelay {
+			delay = maxDelay
+		}
+	}
 }
 
 func handleEventMessage(db *gorm.DB, recorder *metrics.RedisRecorder, geoip *enrich.GeoIP) nsq.HandlerFunc {
