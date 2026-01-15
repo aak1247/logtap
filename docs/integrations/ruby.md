@@ -34,6 +34,8 @@ Net::HTTP.start(uri.hostname, uri.port) do |http|
 end
 ```
 
+同一路径也支持批量：把 `req.body` 改成数组（`[{...},{...}]`）并 `to_json` 即可。
+
 ### 1.2 埋点/事件
 
 ```rb
@@ -58,3 +60,5 @@ Net::HTTP.start(uri.hostname, uri.port) do |http|
   http.request(req)
 end
 ```
+
+同一路径也支持批量：把 `req.body` 改成数组（`[{...},{...}]`）并 `to_json` 即可。

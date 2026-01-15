@@ -172,7 +172,13 @@ curl -sS -X POST "http://localhost:8080/api/1/logs/" \
   -d '{"level":"info","message":"hello","trace_id":"t1","fields":{"k":"v"}}' -i
 ```
 
-支持批量（JSON 数组）与 `Content-Encoding: gzip`（更适合浏览器/移动端 SDK 上报）。
+支持批量（JSON 数组）与 `Content-Encoding: gzip`（更适合浏览器/移动端 SDK 上报），例如：
+
+```bash
+curl -sS -X POST "http://localhost:8080/api/1/logs/" \
+  -H "Content-Type: application/json" \
+  -d '[{"level":"info","message":"hello-1"},{"level":"info","message":"hello-2"}]' -i
+```
 
 如果启用了鉴权（设置了 `AUTH_SECRET`），需要额外带上项目 Key：
 

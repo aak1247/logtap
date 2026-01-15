@@ -34,6 +34,15 @@ logtap 的客户端 SDK（Browser/Node、Go、Flutter）统一使用如下 HTTP 
 }
 ```
 
+批量上报示例（同一路径支持「单条对象」或「JSON 数组」）：
+
+```json
+[
+  { "level": "info", "message": "hello-1", "user": { "id": "u1" }, "fields": { "k": "v1" } },
+  { "level": "info", "message": "hello-2", "user": { "id": "u1" }, "fields": { "k": "v2" } }
+]
+```
+
 字段说明：
 
 - `message`：必填
@@ -59,6 +68,15 @@ logtap 的客户端 SDK（Browser/Node、Go、Flutter）统一使用如下 HTTP 
 }
 ```
 
+批量上报示例：
+
+```json
+[
+  { "name": "signup", "user": { "id": "u1" }, "properties": { "plan": "pro" } },
+  { "name": "purchase", "user": { "id": "u1" }, "properties": { "sku": "s1" } }
+]
+```
+
 服务端落库规则：
 
 - 事件会写入 `logs` 表（用于事件分析/漏斗）
@@ -70,4 +88,3 @@ logtap 的客户端 SDK（Browser/Node、Go、Flutter）统一使用如下 HTTP 
 
 - 「日志」与「埋点事件」建议分开上报：日志走 `/logs/`，埋点走 `/track/`
 - 事件分析只统计 `logs.level="event"`，不会被普通日志污染
-

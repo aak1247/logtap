@@ -31,6 +31,8 @@ req.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8
 var resp = await http.SendAsync(req);
 ```
 
+同一路径也支持批量：把 payload 改成数组（例如 `new[] { ... }`）即可。
+
 ### 1.2 埋点/事件
 
 ```csharp
@@ -47,3 +49,5 @@ req.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8
 
 var resp = await http.SendAsync(req);
 ```
+
+同一路径也支持批量：把 payload 改成数组（例如 `new[] { ... }`）即可。

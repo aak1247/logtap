@@ -60,6 +60,22 @@ await fetch("http://localhost:8080/api/1/logs/", {
 });
 ```
 
+同一路径也支持批量（JSON 数组），返回同样是 `202 Accepted`：
+
+```ts
+await fetch("http://localhost:8080/api/1/logs/", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "X-Project-Key": "pk_xxx",
+  },
+  body: JSON.stringify([
+    { level: "info", message: "hello-1", user: { id: "u1" }, fields: { k: "v1" } },
+    { level: "info", message: "hello-2", user: { id: "u1" }, fields: { k: "v2" } },
+  ]),
+});
+```
+
 ### 2.2 埋点/事件
 
 ```ts
@@ -77,3 +93,18 @@ await fetch("http://localhost:8080/api/1/track/", {
 });
 ```
 
+同一路径也支持批量（JSON 数组）：
+
+```ts
+await fetch("http://localhost:8080/api/1/track/", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "X-Project-Key": "pk_xxx",
+  },
+  body: JSON.stringify([
+    { name: "signup", user: { id: "u1" }, properties: { plan: "pro" } },
+    { name: "purchase", user: { id: "u1" }, properties: { sku: "s1" } },
+  ]),
+});
+```

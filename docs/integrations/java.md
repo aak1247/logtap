@@ -36,6 +36,8 @@ try (Response resp = client.newCall(req).execute()) {
 }
 ```
 
+同一路径也支持批量：请求体改为 JSON 数组（`[{},{}]`）即可。
+
 埋点/事件：
 
 ```java
@@ -52,3 +54,5 @@ Request req = new Request.Builder()
 try (Response resp = client.newCall(req).execute()) {
 }
 ```
+
+同一路径也支持批量：请求体改为 JSON 数组（`[{},{}]`）即可。

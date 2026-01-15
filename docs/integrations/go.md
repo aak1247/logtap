@@ -52,6 +52,8 @@ if err != nil {
 defer resp.Body.Close()
 ```
 
+同一路径也支持批量：把 payload 改成 JSON 数组（`[]any{...}`）即可。
+
 ### 2.2 埋点/事件
 
 ```go
@@ -72,3 +74,5 @@ if err != nil {
 }
 defer resp.Body.Close()
 ```
+
+同一路径也支持批量：把 payload 改成 JSON 数组（`[]any{...}`）即可。

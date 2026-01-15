@@ -8,6 +8,7 @@ logtap 是一个轻量化的 **Sentry 兼容上报网关** + **自定义结构�
 - 用统一的 HTTP 接口上报：
   - **结构化日志**：`POST /api/:projectId/logs/`
   - **埋点/事件**：`POST /api/:projectId/track/`
+  - 同一路径支持「单条对象」或「JSON 数组」批量上报，并支持 `Content-Encoding: gzip`
 - 控制台提供：概览指标、DAU/MAU、事件列表/详情、日志搜索、事件分析/漏斗等
 
 ## 快速开始

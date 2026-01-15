@@ -37,6 +37,8 @@ $res = curl_exec($ch);
 curl_close($ch);
 ```
 
+同一路径也支持批量：把 `$payload` 改成数组（`[ [...], [...] ]`）后再 `json_encode` 即可。
+
 ### 1.2 埋点/事件
 
 ```php
@@ -64,3 +66,5 @@ curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
 $res = curl_exec($ch);
 curl_close($ch);
 ```
+
+同一路径也支持批量：把 `$payload` 改成数组（`[ [...], [...] ]`）后再 `json_encode` 即可。
