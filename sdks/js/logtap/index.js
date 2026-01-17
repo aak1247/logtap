@@ -1,4 +1,4 @@
-const SDK_NAME = "logtap-js";
+const SDK_NAME = "logtap-sdk";
 const SDK_VERSION = "0.1.0";
 
 /**

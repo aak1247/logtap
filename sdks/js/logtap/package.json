@@ -2,9 +2,32 @@
   "name": "logtap-sdk",
   "version": "0.1.0",
   "description": "logtap browser/node logging + tracking SDK",
+  "keywords": [
+    "logtap",
+    "logging",
+    "tracking",
+    "analytics",
+    "sdk",
+    "browser",
+    "node"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aak1247/logtap.git",
+    "directory": "sdks/js/logtap"
+  },
+  "bugs": {
+    "url": "https://github.com/aak1247/logtap/issues"
+  },
+  "homepage": "https://github.com/aak1247/logtap#readme",
   "type": "module",
   "main": "./index.js",
   "types": "./index.d.ts",
+  "files": [
+    "README.md",
+    "index.d.ts",
+    "index.js"
+  ],
   "exports": {
     ".": {
       "types": "./index.d.ts",
