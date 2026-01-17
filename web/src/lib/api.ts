@@ -1,3 +1,5 @@
+import { clearAuth } from "./storage";
+
 export type ApiSettings = {
   apiBase: string;
   token: string;
@@ -311,6 +313,17 @@ export async function revokeProjectKey(
   });
 }
 
+function handleUnauthorized() {
+  if (typeof window === "undefined") return;
+  try {
+    clearAuth();
+  } catch {
+  }
+  if (window.location.pathname !== "/login") {
+    window.location.href = "/login";
+  }
+}
+
 async function fetchJSON<T>(
   url: string,
   token?: string,
@@ -322,6 +335,9 @@ async function fetchJSON<T>(
   };
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(url, { ...init, headers });
+  if (res.status === 401 && token && !url.includes("/api/auth/")) {
+    handleUnauthorized();
+  }
   const text = await res.text().catch(() => "");
   const contentType = res.headers.get("content-type") || "";
   const isJSON = contentType.includes("application/json");

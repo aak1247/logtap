@@ -41,6 +41,7 @@ services:
       - "4171:4171"
 
   logtap:
+    image: crpi-r5fi5bvqffhj53r3.cn-hangzhou.personal.cr.aliyuncs.com/lovetalk/logtap
     build:
       context: ..
       dockerfile: logtap/Dockerfile
@@ -48,6 +49,7 @@ services:
       NSQD_ADDRESS: "nsqd:4150"
       POSTGRES_URL: "postgres://logtap:logtap@postgres:5432/logtap?sslmode=disable"
       RUN_CONSUMERS: "true"
+      AUTH_SECRET: "8jaj8Z0sGq6BIkRJ"
     depends_on:
       - postgres
       - nsqd

@@ -7,6 +7,12 @@ type Settings = {
 const key = "logtap:settings:v1";
 const settingsChangedEvent = "logtap:settings-changed";
 
+let cachedSettings: Settings | null = null;
+
+function sameSettings(a: Settings, b: Settings): boolean {
+  return a.apiBase === b.apiBase && a.token === b.token && a.projectId === b.projectId;
+}
+
 function getRuntimeApiBase(): string {
   if (typeof window === "undefined") return "";
   const origin = window.location.origin;
@@ -25,25 +31,39 @@ export function loadSettings(): Settings {
   const fallbackApiBase = runtimeApiBase || apiBase || "http://localhost:8080";
 
   if (typeof window === "undefined") {
-    return { apiBase: fallbackApiBase, token: "", projectId };
+    const next = { apiBase: fallbackApiBase, token: "", projectId };
+    if (cachedSettings && sameSettings(cachedSettings, next)) return cachedSettings;
+    cachedSettings = next;
+    return next;
   }
 
   try {
     const raw = localStorage.getItem(key);
     if (!raw)
-      return {
+      {
+        const next = {
         apiBase: fallbackApiBase,
         token: "",
         projectId,
       };
+        if (cachedSettings && sameSettings(cachedSettings, next)) return cachedSettings;
+        cachedSettings = next;
+        return next;
+      }
     const parsed = JSON.parse(raw) as Partial<Settings>;
-    return {
+    const next = {
       apiBase: parsed.apiBase || fallbackApiBase,
       token: parsed.token || "",
       projectId: parsed.projectId || projectId,
     };
+    if (cachedSettings && sameSettings(cachedSettings, next)) return cachedSettings;
+    cachedSettings = next;
+    return next;
   } catch {
-    return { apiBase: fallbackApiBase, token: "", projectId };
+    const next = { apiBase: fallbackApiBase, token: "", projectId };
+    if (cachedSettings && sameSettings(cachedSettings, next)) return cachedSettings;
+    cachedSettings = next;
+    return next;
   }
 }
 
@@ -55,6 +75,7 @@ function notifySettingsChanged() {
 export function saveSettings(next: Settings) {
   try {
     localStorage.setItem(key, JSON.stringify(next));
+    cachedSettings = next;
   } finally {
     notifySettingsChanged();
   }
