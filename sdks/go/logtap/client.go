@@ -30,11 +30,15 @@ type ClientOptions struct {
 	ProjectKey string
 
 	FlushInterval time.Duration
+	MinBatchSize  int
 	MaxBatchSize  int
 	MaxQueueSize  int
 	Timeout       time.Duration
 
 	Gzip bool
+
+	ImmediateEvents []string
+	ImmediateEvent  func(name string, payload TrackEventPayload) bool
 
 	DeviceID string
 	User     *User
@@ -56,6 +60,7 @@ type Client struct {
 	projectKey string
 
 	flushInterval time.Duration
+	minBatchSize  int
 	maxBatchSize  int
 	maxQueueSize  int
 	timeout       time.Duration
@@ -75,17 +80,26 @@ type Client struct {
 	globalContexts   map[string]any
 	beforeSend       BeforeSendFunc
 
-	logQueue   []LogPayload
-	trackQueue []TrackEventPayload
+	logQueue      []LogPayload
+	trackQueue    []TrackEventPayload
+	firstQueuedAt time.Time
+
+	immediateEvents map[string]struct{}
+	immediateEvent  func(name string, payload TrackEventPayload) bool
 
 	backoff time.Duration
 
 	flushMu sync.Mutex
 
-	ticker *time.Ticker
-	done   chan struct{}
-	wg     sync.WaitGroup
-	closed bool
+	ticker  *time.Ticker
+	flushCh chan flushRequest
+	done    chan struct{}
+	wg      sync.WaitGroup
+	closed  bool
+}
+
+type flushRequest struct {
+	force bool
 }
 
 func NewClient(options ClientOptions) (*Client, error) {
@@ -100,6 +114,11 @@ func NewClient(options ClientOptions) (*Client, error) {
 	flushInterval := options.FlushInterval
 	if flushInterval == 0 {
 		flushInterval = 2 * time.Second
+	}
+
+	minBatchSize := options.MinBatchSize
+	if minBatchSize <= 0 {
+		minBatchSize = 1
 	}
 
 	maxBatchSize := options.MaxBatchSize
@@ -132,16 +151,29 @@ func NewClient(options ClientOptions) (*Client, error) {
 		httpClient = http.DefaultClient
 	}
 
+	immediateEvents := map[string]struct{}{}
+	for _, n := range options.ImmediateEvents {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		immediateEvents[n] = struct{}{}
+	}
+
 	c := &Client{
 		baseURL:    baseURL,
 		projectID:  strconv.FormatInt(options.ProjectID, 10),
 		projectKey: strings.TrimSpace(options.ProjectKey),
 
 		flushInterval: flushInterval,
+		minBatchSize:  minBatchSize,
 		maxBatchSize:  maxBatchSize,
 		maxQueueSize:  maxQueueSize,
 		timeout:       timeout,
 		gzip:          options.Gzip,
+
+		immediateEvents: immediateEvents,
+		immediateEvent:  options.ImmediateEvent,
 
 		httpClient: httpClient,
 		now:        nowFn,
@@ -154,24 +186,35 @@ func NewClient(options ClientOptions) (*Client, error) {
 		globalContexts:   jsonSafeAnyMap(options.GlobalContexts),
 		beforeSend:       options.BeforeSend,
 
-		done: make(chan struct{}),
+		flushCh: make(chan flushRequest, 1),
+		done:    make(chan struct{}),
 	}
 
 	if c.flushInterval > 0 {
 		c.ticker = time.NewTicker(c.flushInterval)
-		c.wg.Add(1)
-		go func() {
-			defer c.wg.Done()
-			for {
-				select {
-				case <-c.ticker.C:
-					_ = c.Flush(context.Background())
-				case <-c.done:
-					return
-				}
-			}
-		}()
 	}
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		for {
+			var tick <-chan time.Time
+			if c.ticker != nil {
+				tick = c.ticker.C
+			}
+			select {
+			case <-tick:
+				_ = c.FlushIfNeeded(context.Background())
+			case req := <-c.flushCh:
+				if req.force {
+					_ = c.Flush(context.Background())
+				} else {
+					_ = c.FlushIfNeeded(context.Background())
+				}
+			case <-c.done:
+				return
+			}
+		}
+	}()
 
 	return c, nil
 }
@@ -337,6 +380,7 @@ func (c *Client) Track(name string, properties map[string]any, opts *TrackOption
 	var user map[string]any
 	var contexts map[string]any
 	var extra map[string]any
+	immediate := false
 
 	if opts != nil {
 		if !opts.Timestamp.IsZero() {
@@ -349,6 +393,7 @@ func (c *Client) Track(name string, properties map[string]any, opts *TrackOption
 		user = userToMap(opts.User)
 		contexts = jsonSafeAnyMap(opts.Contexts)
 		extra = jsonSafeAnyMap(opts.Extra)
+		immediate = opts.Immediate
 	}
 
 	c.mu.Lock()
@@ -386,7 +431,33 @@ func (c *Client) Track(name string, properties map[string]any, opts *TrackOption
 		}
 	}
 
+	if immediate || c.isImmediateEvent(n, payload) {
+		ok, err := c.postJSON(context.Background(), "/track/", []TrackEventPayload{payload})
+		if err == nil && ok {
+			return
+		}
+		c.enqueueTrack(payload)
+		c.bumpBackoff()
+		c.signalRetry()
+		return
+	}
+
 	c.enqueueTrack(payload)
+}
+
+func (c *Client) isImmediateEvent(name string, payload TrackEventPayload) bool {
+	if c == nil {
+		return false
+	}
+	if c.immediateEvent != nil {
+		defer func() { _ = recover() }()
+		return c.immediateEvent(name, payload)
+	}
+	if c.immediateEvents == nil {
+		return false
+	}
+	_, ok := c.immediateEvents[name]
+	return ok
 }
 
 func sdkInfo() map[string]any {
@@ -422,21 +493,83 @@ func applyBeforeSend[T any](fn BeforeSendFunc, payload *T) (out *T) {
 }
 
 func (c *Client) enqueueLog(payload LogPayload) {
+	var shouldSignal bool
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.logQueue = append(c.logQueue, payload)
+	if c.firstQueuedAt.IsZero() {
+		c.firstQueuedAt = c.now().UTC()
+	}
 	if len(c.logQueue) > c.maxQueueSize {
 		c.logQueue = append([]LogPayload(nil), c.logQueue[len(c.logQueue)-c.maxQueueSize:]...)
+	}
+	shouldSignal = c.minBatchSize > 1 && (len(c.logQueue)+len(c.trackQueue)) >= c.minBatchSize
+	c.mu.Unlock()
+	if shouldSignal {
+		c.signalFlush()
 	}
 }
 
 func (c *Client) enqueueTrack(payload TrackEventPayload) {
+	var shouldSignal bool
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.trackQueue = append(c.trackQueue, payload)
+	if c.firstQueuedAt.IsZero() {
+		c.firstQueuedAt = c.now().UTC()
+	}
 	if len(c.trackQueue) > c.maxQueueSize {
 		c.trackQueue = append([]TrackEventPayload(nil), c.trackQueue[len(c.trackQueue)-c.maxQueueSize:]...)
 	}
+	shouldSignal = c.minBatchSize > 1 && (len(c.logQueue)+len(c.trackQueue)) >= c.minBatchSize
+	c.mu.Unlock()
+	if shouldSignal {
+		c.signalFlush()
+	}
+}
+
+func (c *Client) signalFlush() {
+	if c == nil {
+		return
+	}
+	select {
+	case c.flushCh <- flushRequest{force: false}:
+	default:
+	}
+}
+
+func (c *Client) signalRetry() {
+	if c == nil {
+		return
+	}
+	select {
+	case c.flushCh <- flushRequest{force: true}:
+	default:
+	}
+}
+
+// FlushIfNeeded auto-flushes when either:
+// - queued items reach MinBatchSize, or
+// - the oldest queued item waits longer than FlushInterval.
+//
+// It does nothing if neither threshold is met.
+func (c *Client) FlushIfNeeded(ctx context.Context) error {
+	c.mu.Lock()
+	queued := len(c.logQueue) + len(c.trackQueue)
+	first := c.firstQueuedAt
+	minBatch := c.minBatchSize
+	interval := c.flushInterval
+	now := c.now().UTC()
+	c.mu.Unlock()
+
+	if queued == 0 {
+		return nil
+	}
+	if minBatch > 1 && queued >= minBatch {
+		return c.Flush(ctx)
+	}
+	if interval > 0 && !first.IsZero() && now.Sub(first) >= interval {
+		return c.Flush(ctx)
+	}
+	return nil
 }
 
 func (c *Client) Flush(ctx context.Context) error {
@@ -468,6 +601,11 @@ func (c *Client) Flush(ctx context.Context) error {
 			c.mu.Unlock()
 			continue
 		}
+		c.mu.Lock()
+		if len(c.logQueue)+len(c.trackQueue) == 0 {
+			c.firstQueuedAt = time.Time{}
+		}
+		c.mu.Unlock()
 		return nil
 	}
 }
@@ -514,6 +652,7 @@ func (c *Client) flushLogsOnce(ctx context.Context) (bool, error) {
 	if ok, err := c.postJSON(ctx, "/logs/", batch); err != nil || !ok {
 		c.requeueLogsFront(batch)
 		c.bumpBackoff()
+		c.signalRetry()
 		if err != nil {
 			return false, err
 		}
@@ -530,6 +669,7 @@ func (c *Client) flushTrackOnce(ctx context.Context) (bool, error) {
 	if ok, err := c.postJSON(ctx, "/track/", batch); err != nil || !ok {
 		c.requeueTrackFront(batch)
 		c.bumpBackoff()
+		c.signalRetry()
 		if err != nil {
 			return false, err
 		}

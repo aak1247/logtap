@@ -41,6 +41,9 @@ export interface LogtapClientOptions {
   projectId: number | string;
   projectKey?: string;
   flushIntervalMs?: number;
+  minBatchSize?: number;
+  immediateEvents?: string[];
+  immediateEvent?: (name: string) => boolean;
   maxBatchSize?: number;
   maxQueueSize?: number;
   timeoutMs?: number;
@@ -97,6 +100,7 @@ export class LogtapClient {
       user?: LogtapUser;
       contexts?: Record<string, any>;
       extra?: Record<string, any>;
+      immediate?: boolean;
     },
   ): void;
 

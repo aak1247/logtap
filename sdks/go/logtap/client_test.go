@@ -307,3 +307,292 @@ func TestClient_PostBody_IsValidJSONArray(t *testing.T) {
 		t.Fatalf("expected JSON array body, got: %s", string(body))
 	}
 }
+
+func TestClient_AutoFlush_MinBatchSize(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu    sync.Mutex
+		calls int
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/1/logs/" {
+			mu.Lock()
+			calls++
+			mu.Unlock()
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(ClientOptions{
+		BaseURL:       srv.URL,
+		ProjectID:     1,
+		ProjectKey:    "pk_test",
+		FlushInterval: -1,
+		MinBatchSize:  3,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
+
+	client.Info("m1", nil, nil)
+	client.Info("m2", nil, nil)
+
+	time.Sleep(120 * time.Millisecond)
+	mu.Lock()
+	got := calls
+	mu.Unlock()
+	if got != 0 {
+		t.Fatalf("expected 0 requests before threshold, got %d", got)
+	}
+
+	client.Info("m3", nil, nil)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		got = calls
+		mu.Unlock()
+		if got >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for auto flush (calls=%d)", got)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func TestClient_AutoFlush_FlushInterval(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu    sync.Mutex
+		calls int
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/1/logs/" {
+			mu.Lock()
+			calls++
+			mu.Unlock()
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(ClientOptions{
+		BaseURL:       srv.URL,
+		ProjectID:     1,
+		ProjectKey:    "pk_test",
+		FlushInterval: 150 * time.Millisecond,
+		MinBatchSize:  100,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
+
+	client.Info("m1", nil, nil)
+
+	time.Sleep(60 * time.Millisecond)
+	mu.Lock()
+	got := calls
+	mu.Unlock()
+	if got != 0 {
+		t.Fatalf("expected 0 requests before time threshold, got %d", got)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		got = calls
+		mu.Unlock()
+		if got >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for time-based flush (calls=%d)", got)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func TestClient_ImmediateEvents_BypassBatchingForTrack(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu         sync.Mutex
+		trackCalls int
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/1/track/" {
+			mu.Lock()
+			trackCalls++
+			mu.Unlock()
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(ClientOptions{
+		BaseURL:         srv.URL,
+		ProjectID:       1,
+		ProjectKey:      "pk_test",
+		FlushInterval:   -1,
+		MinBatchSize:    100,
+		ImmediateEvents: []string{"purchase"},
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
+
+	client.Track("signup", map[string]any{"plan": "free"}, nil)
+	time.Sleep(120 * time.Millisecond)
+	mu.Lock()
+	got := trackCalls
+	mu.Unlock()
+	if got != 0 {
+		t.Fatalf("expected 0 track calls before immediate event, got %d", got)
+	}
+
+	client.Track("purchase", map[string]any{"amount": 1}, nil)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		got = trackCalls
+		mu.Unlock()
+		if got >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for immediate track call (calls=%d)", got)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func TestClient_Retry_AfterFailure_NoNewItems(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu        sync.Mutex
+		logCalls  int
+		failFirst = true
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/1/logs/" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+
+		mu.Lock()
+		logCalls++
+		shouldFail := failFirst
+		failFirst = false
+		mu.Unlock()
+
+		if shouldFail {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(ClientOptions{
+		BaseURL:       srv.URL,
+		ProjectID:     1,
+		ProjectKey:    "pk_test",
+		FlushInterval: -1,
+		MinBatchSize:  100,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
+
+	client.Info("m1", nil, nil)
+	if err := client.Flush(context.Background()); err == nil {
+		t.Fatalf("expected flush to fail once")
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		mu.Lock()
+		got := logCalls
+		mu.Unlock()
+		if got >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for retry (calls=%d)", got)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func TestClient_ImmediateTrack_RetryOnFailure(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu         sync.Mutex
+		trackCalls int
+		failFirst  = true
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/1/track/" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+
+		mu.Lock()
+		trackCalls++
+		shouldFail := failFirst
+		failFirst = false
+		mu.Unlock()
+
+		if shouldFail {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(ClientOptions{
+		BaseURL:         srv.URL,
+		ProjectID:       1,
+		ProjectKey:      "pk_test",
+		FlushInterval:   -1,
+		MinBatchSize:    100,
+		ImmediateEvents: []string{"purchase"},
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
+
+	client.Track("purchase", map[string]any{"amount": 1}, nil)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		mu.Lock()
+		got := trackCalls
+		mu.Unlock()
+		if got >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for retry (calls=%d)", got)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}

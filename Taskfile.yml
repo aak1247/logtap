@@ -64,3 +64,11 @@ tasks:
     cmds:
       - task: docker:build
       - task: docker:push
+
+  test:it:
+    desc: Run integration tests once (no cache)
+    cmds:
+      - go test ./sdks/go/logtap -run TestGoSDK_Integration_ -count=1
+      - go test ./internal/integration -run TestIntegration_ -count=1
+      # JS SDK batching/behavior sanity check (the JS end-to-end test runs inside TestIntegration_JSSDK_Gateway_SQLite)
+      - powershell -NoProfile -Command "if (Get-Command node -ErrorAction SilentlyContinue) { node sdks/js/logtap/test/batching.test.mjs } else { Write-Host 'skip js sdk batching test (node not found)' }"

@@ -24,6 +24,9 @@ const client = new LogtapClient({
   projectId: 1,
   projectKey: "pk_xxx",
   gzip: true,
+  flushIntervalMs: 5000, // 最大延迟（到时间也会发）
+  minBatchSize: 20,      // 达到条数立即发
+  immediateEvents: ["purchase", "payment_succeeded"],
   globalTags: { env: "prod" },
   globalContexts: { app: { version: "1.2.3" } },
 });

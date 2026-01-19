@@ -10,8 +10,8 @@ import (
 
 	"github.com/aak1247/logtap/internal/ingest"
 	"github.com/aak1247/logtap/internal/model"
+	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -202,4 +202,3 @@ func TestParseSentryTimestamp(t *testing.T) {
 		t.Fatalf("expected unix %d, got %d", base.Unix(), got.Unix())
 	}
 }
-

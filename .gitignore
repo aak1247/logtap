@@ -6,6 +6,9 @@ node_modules/
 data/geoip/
 **/.npm-cache/
 *.tgz
+*.go.[0-9]*
+.claude/
+.serena/
 
 # Flutter / Dart
 .dart_tool/

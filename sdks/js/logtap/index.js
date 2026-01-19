@@ -50,6 +50,9 @@ const SDK_VERSION = "0.1.0";
  * @property {number|string} projectId
  * @property {string=} projectKey sent as X-Project-Key: pk_...
  * @property {number=} flushIntervalMs default 2000
+ * @property {number=} minBatchSize default 1 (auto-flush when queued >= minBatchSize; set >1 to reduce request count)
+ * @property {string[]=} immediateEvents send these event names immediately (track only; bypass batching)
+ * @property {(name: string) => boolean=} immediateEvent custom predicate for immediate events (overrides immediateEvents)
  * @property {number=} maxBatchSize default 50
  * @property {number=} maxQueueSize default 1000 per queue
  * @property {number=} timeoutMs default 5000
@@ -159,6 +162,9 @@ export class LogtapClient {
     this._projectKey = options.projectKey ? String(options.projectKey).trim() : "";
     this._timeoutMs = Number(options.timeoutMs ?? 5000);
     this._flushIntervalMs = Number(options.flushIntervalMs ?? 2000);
+    this._minBatchSize = Math.max(1, Number(options.minBatchSize ?? 1));
+    this._immediateEvent = typeof options.immediateEvent === "function" ? options.immediateEvent : null;
+    this._immediateEvents = new Set(Array.isArray(options.immediateEvents) ? options.immediateEvents.map(String) : []);
     this._maxBatchSize = Number(options.maxBatchSize ?? 50);
     this._maxQueueSize = Number(options.maxQueueSize ?? 1000);
     this._gzip = Boolean(options.gzip ?? false);
@@ -179,12 +185,18 @@ export class LogtapClient {
     /** @type {LogtapTrackEvent[]} */
     this._trackQueue = [];
 
+    this._firstQueuedAtMs = 0;
+    this._autoFlushScheduled = false;
+    this._retryTimer = null;
+    this._pending = new Set();
+
     this._backoffMs = 0;
     this._flushing = null;
     this._timer = null;
 
     if (this._flushIntervalMs > 0) {
-      this._timer = setInterval(() => void this.flush(), this._flushIntervalMs);
+      const tickMs = Math.max(50, Math.min(this._flushIntervalMs, 500));
+      this._timer = setInterval(() => void this._autoFlushIfNeeded(), tickMs);
       // In Node, don't keep the process alive for the timer.
       if (!isBrowser() && typeof this._timer?.unref === "function") {
         this._timer.unref();
@@ -306,7 +318,39 @@ export class LogtapClient {
       sdk: { name: SDK_NAME, version: SDK_VERSION, runtime: isBrowser() ? "browser" : "node" },
     };
 
+    const immediate = Boolean(options?.immediate) || this._isImmediateEvent(n);
+    if (immediate) {
+      this._sendImmediateTrack(payload);
+      return;
+    }
     this._enqueueTrack(payload);
+  }
+
+  _isImmediateEvent(name) {
+    try {
+      if (this._immediateEvent) return Boolean(this._immediateEvent(name));
+    } catch {
+    }
+    return this._immediateEvents?.has(name) ?? false;
+  }
+
+  _sendImmediateTrack(payload) {
+    const p = (async () => {
+      try {
+        const ok = await this._postJSON("/track/", [payload]);
+        if (!ok) {
+          this._enqueueTrack(payload);
+          this._backoffMs = this._backoffMs > 0 ? Math.min(this._backoffMs * 2, 30000) : 500;
+          this._scheduleRetry();
+        }
+      } catch {
+        this._enqueueTrack(payload);
+        this._backoffMs = this._backoffMs > 0 ? Math.min(this._backoffMs * 2, 30000) : 500;
+        this._scheduleRetry();
+      }
+    })();
+    this._pending.add(p);
+    p.finally(() => this._pending.delete(p));
   }
 
   /**
@@ -321,6 +365,12 @@ export class LogtapClient {
     return this._flushing;
   }
 
+  async _awaitPending() {
+    const pending = Array.from(this._pending);
+    if (pending.length === 0) return;
+    await Promise.allSettled(pending);
+  }
+
   /**
    * Stop periodic flushing and try to send remaining payloads.
    * @returns {Promise<void>}
@@ -328,6 +378,9 @@ export class LogtapClient {
   async close() {
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
+    if (this._retryTimer) clearTimeout(this._retryTimer);
+    this._retryTimer = null;
+    await this._awaitPending();
     await this.flush();
   }
 
@@ -411,20 +464,67 @@ export class LogtapClient {
   _enqueueLog(payload) {
     const p = this._applyBeforeSend(payload);
     if (!p) return;
+    if (this._logQueue.length === 0 && this._trackQueue.length === 0) {
+      this._firstQueuedAtMs = Date.now();
+    }
     this._logQueue.push(p);
     if (this._logQueue.length > this._maxQueueSize) {
       this._logQueue.splice(0, this._logQueue.length - this._maxQueueSize);
     }
+    this._maybeScheduleAutoFlush();
   }
 
   /** @param {LogtapTrackEvent} payload */
   _enqueueTrack(payload) {
     const p = this._applyBeforeSend(payload);
     if (!p) return;
+    if (this._logQueue.length === 0 && this._trackQueue.length === 0) {
+      this._firstQueuedAtMs = Date.now();
+    }
     this._trackQueue.push(p);
     if (this._trackQueue.length > this._maxQueueSize) {
       this._trackQueue.splice(0, this._trackQueue.length - this._maxQueueSize);
     }
+    this._maybeScheduleAutoFlush();
+  }
+
+  _maybeScheduleAutoFlush() {
+    if (this._minBatchSize <= 1) return;
+    if (this._autoFlushScheduled) return;
+    if (this._logQueue.length + this._trackQueue.length < this._minBatchSize) return;
+
+    this._autoFlushScheduled = true;
+    queueMicrotask(() => {
+      this._autoFlushScheduled = false;
+      this._autoFlushIfNeeded();
+    });
+  }
+
+  _autoFlushIfNeeded() {
+    const queued = this._logQueue.length + this._trackQueue.length;
+    if (queued === 0) return;
+
+    if (this._minBatchSize > 1 && queued >= this._minBatchSize) {
+      void this.flush();
+      return;
+    }
+
+    if (this._flushIntervalMs > 0 && this._firstQueuedAtMs > 0) {
+      const ageMs = Date.now() - this._firstQueuedAtMs;
+      if (ageMs >= this._flushIntervalMs) {
+        void this.flush();
+      }
+    }
+  }
+
+  _scheduleRetry() {
+    if (this._retryTimer) return;
+    this._retryTimer = setTimeout(() => {
+      this._retryTimer = null;
+      if (this._logQueue.length + this._trackQueue.length > 0) {
+        void this.flush();
+      }
+    }, 0);
   }
 
   _applyBeforeSend(payload) {
@@ -464,7 +564,14 @@ export class LogtapClient {
 
     if (sentAny && !failed) {
       this._backoffMs = 0;
+      if (this._logQueue.length === 0 && this._trackQueue.length === 0) {
+        this._firstQueuedAtMs = 0;
+      }
       return;
+    }
+
+    if (this._logQueue.length === 0 && this._trackQueue.length === 0) {
+      this._firstQueuedAtMs = 0;
     }
   }
 
@@ -478,6 +585,7 @@ export class LogtapClient {
     if (!ok) {
       queue.unshift(...batch);
       this._backoffMs = this._backoffMs > 0 ? Math.min(this._backoffMs * 2, 30000) : 500;
+      this._scheduleRetry();
       return false;
     }
     return true;

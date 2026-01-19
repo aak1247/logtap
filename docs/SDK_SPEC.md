@@ -16,6 +16,7 @@
   - 单次最多发送 `maxBatchSize` 条；队列上限 `maxQueueSize`（超出丢弃最旧）
 - 可靠性：
   - 发送失败自动指数退避（上限 30s）
+  - 失败后会自动重试（即使没有新日志入队）
   - `flush()`/`close()`：显式触发发送；`close()` 会停止定时器并尽力发送剩余数据
 - 压缩：
   - 可选 `gzip`（不支持的平台自动降级为非 gzip）
@@ -35,7 +36,9 @@
 - `baseUrl`（必填）
 - `projectId`（必填）
 - `projectKey`（可选；启用 `AUTH_SECRET` 时必填）
-- `flushIntervalMs` / `flushInterval`
+- `flushIntervalMs` / `flushInterval`：最大延迟（到时间仍未攒够也会发送）
+- `minBatchSize`：攒够多少条再自动发送（未达到且未超时则本地队列保留）
+- `immediateEvents`：哪些事件（track）需要绕过批处理立即上报（例如支付成功）
 - `maxBatchSize`
 - `maxQueueSize`
 - `timeoutMs` / `timeout`

@@ -69,4 +69,5 @@ type TrackOptions struct {
 	User      *User
 	Contexts  map[string]any
 	Extra     map[string]any
+	Immediate bool
 }

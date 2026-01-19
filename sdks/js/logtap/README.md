@@ -12,6 +12,11 @@ const client = new LogtapClient({
   projectId: 1,
   projectKey: "pk_xxx", // 启用 AUTH_SECRET 时必填
   gzip: true, // 浏览器需要支持 CompressionStream；否则会自动降级为非 gzip
+  // 批处理：尽量攒够再发，避免请求过多
+  flushIntervalMs: 5000, // 最大延迟（到时间也会发）
+  minBatchSize: 20,      // 达到条数立即发
+  // 关键事件：绕过批处理立即上报（只影响 track）
+  immediateEvents: ["purchase", "payment_succeeded"],
   globalContexts: { app: { version: "1.2.3" } },
 });
 ```
@@ -28,6 +33,7 @@ client.error("boom", { err: String(err), stack: err?.stack });
 ```js
 client.identify("u1", { plan: "pro" });
 client.track("signup", { from: "landing" });
+client.track("purchase", { amount: 1 }, { immediate: true }); // 单次强制立即上报
 ```
 
 也支持在单次调用里带 `contexts/extra/user/deviceId`（覆盖全局默认值）：
@@ -47,7 +53,7 @@ client.captureNodeErrors();    // Node：unhandledRejection / uncaughtException
 
 ## Flush / 退出前发送
 
-SDK 默认每 2 秒自动 flush；也可手动调用：
+SDK 会把日志/事件先放在本地队列里，满足「条数阈值」或「时间阈值」才上报；也可手动调用：
 
 ```js
 await client.flush();
