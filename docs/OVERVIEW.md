@@ -16,6 +16,7 @@ logtap 是一个轻量化的 **Sentry 兼容上报网关** + **自定义结构�
 - 部署：见 `DEPLOYMENT.md`
 - 上报模型与接口：见 `INGEST.md`
 - SDK（JS/Go/Flutter）：见 `SDKs.md` 与 `SDK_SPEC.md`
+- 性能优化 Tech Spec：见 `PERFORMANCE_TECH_SPEC.md`
 - 语言集成教程：见 `integrations/javascript.md`（也可从文档页左侧导航进入）
 
 ## 鉴权模式（推荐）

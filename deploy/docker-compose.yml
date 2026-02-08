@@ -9,7 +9,6 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
 
   redis:
     image: redis:7
@@ -25,7 +24,7 @@ services:
 
   nsqd:
     image: nsqio/nsq:v1.2.1
-    command: /nsqd --lookupd-tcp-address=nsqlookupd:4160 --broadcast-address=nsqd
+    command: /nsqd --lookupd-tcp-address=nsqlookupd:4160 --broadcast-address=nsqd --max-msg-size=26214400
     depends_on:
       - nsqlookupd
     ports:
@@ -45,16 +44,28 @@ services:
     build:
       context: ..
       dockerfile: logtap/Dockerfile
+      args:
+        MAXMIND_LICENSE_KEY: "${MAXMIND_LICENSE_KEY}"
     environment:
       NSQD_ADDRESS: "nsqd:4150"
+      NSQD_HTTP_ADDRESS: "nsqd:4151"
       POSTGRES_URL: "postgres://logtap:logtap@postgres:5432/logtap?sslmode=disable"
+      DB_REQUIRE_TIMESCALE: "true"
       RUN_CONSUMERS: "true"
-      AUTH_SECRET: "8jaj8Z0sGq6BIkRJ"
+      # Required: base64 secret (decoded length >= 32 bytes).
+      # Generate: `task auth:secret` (run in repo `logtap/`).
+      AUTH_SECRET: "${AUTH_SECRET}"
+      # Optional: GeoLite2 mmdb download (recommended for distribution/analytics with GeoIP).
+      MAXMIND_LICENSE_KEY: "${MAXMIND_LICENSE_KEY}"
+      GEOIP_DIR: "/data/geoip"
     depends_on:
       - postgres
       - nsqd
     ports:
       - "8080:8080"
+    volumes:
+      - geoip:/data/geoip
 
 volumes:
   pgdata: {}
+  geoip: {}

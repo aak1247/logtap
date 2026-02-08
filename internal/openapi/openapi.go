@@ -212,6 +212,38 @@ func Spec() map[string]any {
 						"404": map[string]any{"description": "Not found"},
 					},
 				},
+				"delete": map[string]any{
+					"tags":        []string{"projects"},
+					"summary":     "Delete project",
+					"operationId": "deleteProject",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{
+							"name":     "projectId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "Deleted",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": envelopeSchema(map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"deleted": map[string]any{"type": "boolean"},
+										},
+										"required": []string{"deleted"},
+									}),
+								},
+							},
+						},
+						"401": map[string]any{"description": "Unauthorized"},
+						"404": map[string]any{"description": "Not found"},
+					},
+				},
 			},
 			"/api/projects/{projectId}/keys": map[string]any{
 				"get": map[string]any{

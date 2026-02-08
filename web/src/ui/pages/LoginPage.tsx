@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getSystemStatus, login } from "../../lib/api";
-import { loadSettings, saveSettings } from "../../lib/storage";
+import { loadSettings, normalizeApiBase, saveSettings } from "../../lib/storage";
 import { Panel } from "../components/Panel";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -65,13 +65,13 @@ export function LoginPage() {
       ) : null}
 
       <Panel title="连接">
-        <label className="block text-xs text-zinc-400">API Base</label>
+        <label className="block text-xs text-zinc-400">API Base（不要包含 /api）</label>
         <input
           value={apiBase}
           onChange={(e) => {
             const raw = e.target.value;
             setApiBase(raw);
-            const base = raw.trim().replace(/\/+$/, "");
+            const base = normalizeApiBase(raw);
             const s = loadSettings();
             if (s.apiBase !== base) saveSettings({ ...s, apiBase: base });
           }}
@@ -109,7 +109,7 @@ export function LoginPage() {
                 try {
                   setBusy(true);
                   setLoginErr("");
-                  const base = apiBase.trim().replace(/\/+$/, "");
+                  const base = normalizeApiBase(apiBase);
                   const res = await login(base, email.trim(), password);
                   saveSettings({ apiBase: base, token: res.token, projectId: "" });
                   window.location.href = "/projects";

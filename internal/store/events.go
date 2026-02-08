@@ -16,9 +16,17 @@ import (
 )
 
 func InsertEvent(ctx context.Context, db *gorm.DB, projectID string, event map[string]any) error {
-	projectIDInt, err := project.ParseID(projectID)
+	row, err := EventRowFromMap(projectID, event)
 	if err != nil {
 		return err
+	}
+	return db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
+}
+
+func EventRowFromMap(projectID string, event map[string]any) (model.Event, error) {
+	projectIDInt, err := project.ParseID(projectID)
+	if err != nil {
+		return model.Event{}, err
 	}
 
 	eventID, _ := event["event_id"].(string)
@@ -61,7 +69,7 @@ func InsertEvent(ctx context.Context, db *gorm.DB, projectID string, event map[s
 		Title:       title,
 		Data:        datatypes.JSON(data),
 	}
-	return db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
+	return row, nil
 }
 
 func parseSentryTimestamp(v any) time.Time {

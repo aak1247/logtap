@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import http from "node:http";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { LogtapClient } from "../index.js";
 
 function sleep(ms) {
@@ -170,4 +173,69 @@ async function waitFor(cond, timeoutMs = 1500) {
 
   await client.close();
   await new Promise((resolve) => srv.close(resolve));
+}
+
+// Scenario 5: persistQueue replays after restart (Node file).
+{
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "logtap-js-queue-"));
+  const queueFilePath = path.join(dir, "queue.json");
+
+  const failSrv = http.createServer((req, res) => {
+    if (req.method === "POST" && (req.url === "/api/1/logs/" || req.url === "/api/1/track/")) {
+      res.writeHead(503);
+      res.end();
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise((resolve) => failSrv.listen(0, "127.0.0.1", resolve));
+  const failPort = failSrv.address().port;
+  const failBaseUrl = `http://127.0.0.1:${failPort}`;
+
+  const c1 = new LogtapClient({
+    baseUrl: failBaseUrl,
+    projectId: 1,
+    flushIntervalMs: -1,
+    persistQueue: true,
+    persistDebounceMs: 0,
+    queueFilePath,
+  });
+  c1.error("boom");
+  await c1.flush();
+  await c1.close();
+  await new Promise((resolve) => failSrv.close(resolve));
+
+  await fs.stat(queueFilePath);
+
+  /** @type {{count: number}} */
+  const state = { count: 0 };
+  const okSrv = http.createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/api/1/logs/") {
+      state.count += 1;
+      res.writeHead(202);
+      res.end();
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise((resolve) => okSrv.listen(0, "127.0.0.1", resolve));
+  const okPort = okSrv.address().port;
+  const okBaseUrl = `http://127.0.0.1:${okPort}`;
+
+  const c2 = new LogtapClient({
+    baseUrl: okBaseUrl,
+    projectId: 1,
+    flushIntervalMs: -1,
+    persistQueue: true,
+    persistDebounceMs: 0,
+    queueFilePath,
+  });
+
+  await waitFor(() => state.count >= 1, 2500);
+  await c2.close();
+  await new Promise((resolve) => okSrv.close(resolve));
+
+  await assert.rejects(() => fs.stat(queueFilePath));
 }

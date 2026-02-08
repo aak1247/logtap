@@ -72,3 +72,8 @@ tasks:
       - go test ./internal/integration -run TestIntegration_ -count=1
       # JS SDK batching/behavior sanity check (the JS end-to-end test runs inside TestIntegration_JSSDK_Gateway_SQLite)
       - powershell -NoProfile -Command "if (Get-Command node -ErrorAction SilentlyContinue) { node sdks/js/logtap/test/batching.test.mjs } else { Write-Host 'skip js sdk batching test (node not found)' }"
+
+  test:unit:
+    desc: Run unit tests (exclude internal/integration)
+    cmds:
+      - bash -lc "go test $(go list ./... | rg -v github.com/aak1247/logtap/internal/integration) -count=1"

@@ -28,7 +28,24 @@ func OpenTestDB(t testing.TB) *gorm.DB {
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 
-	if err := gdb.AutoMigrate(&model.User{}, &model.Project{}, &model.ProjectKey{}, &model.Event{}, &model.Log{}); err != nil {
+	if err := gdb.AutoMigrate(
+		&model.User{},
+		&model.Project{},
+		&model.ProjectKey{},
+		&model.Event{},
+		&model.Log{},
+		&model.TrackEvent{},
+		&model.TrackEventDaily{},
+
+		&model.AlertContact{},
+		&model.AlertContactGroup{},
+		&model.AlertContactGroupMember{},
+		&model.AlertWecomBot{},
+		&model.AlertWebhookEndpoint{},
+		&model.AlertRule{},
+		&model.AlertState{},
+		&model.AlertDelivery{},
+	); err != nil {
 		t.Fatalf("AutoMigrate: %v", err)
 	}
 	return gdb

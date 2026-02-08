@@ -3,7 +3,6 @@ package consumer
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -13,30 +12,55 @@ import (
 	"github.com/aak1247/logtap/internal/identity"
 	"github.com/aak1247/logtap/internal/ingest"
 	"github.com/aak1247/logtap/internal/metrics"
-	"github.com/aak1247/logtap/internal/project"
+	"github.com/aak1247/logtap/internal/model"
+	"github.com/aak1247/logtap/internal/obs"
 	"github.com/aak1247/logtap/internal/store"
+	"github.com/google/uuid"
 	"github.com/nsqio/go-nsq"
 	"gorm.io/gorm"
 )
 
 type NSQConsumer struct {
 	consumer *nsq.Consumer
+	onStop   []func()
 }
 
-func NewNSQEventConsumer(ctx context.Context, cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder, geoip *enrich.GeoIP) (*NSQConsumer, error) {
+func NewNSQEventConsumer(ctx context.Context, cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder, geoip *enrich.GeoIP, stats *obs.Stats) (*NSQConsumer, error) {
 	channel := cfg.NSQEventChannel
 	if channel == "" {
 		channel = "event-consumer"
 	}
-	return newConsumer(ctx, cfg, "events", channel, handleEventMessage(db, recorder, geoip))
+	handler, cleanup := handleEventMessage(cfg, db, recorder, geoip, stats)
+	c, err := newConsumer(ctx, cfg, "events", channel, cfg.NSQEventConcurrency, handler)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return nil, err
+	}
+	if cleanup != nil {
+		c.onStop = append(c.onStop, cleanup)
+	}
+	return c, nil
 }
 
-func NewNSQLogConsumer(ctx context.Context, cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder) (*NSQConsumer, error) {
+func NewNSQLogConsumer(ctx context.Context, cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder, stats *obs.Stats) (*NSQConsumer, error) {
 	channel := cfg.NSQLogChannel
 	if channel == "" {
 		channel = "log-consumer"
 	}
-	return newConsumer(ctx, cfg, "logs", channel, handleLogMessage(db, recorder))
+	handler, cleanup := handleLogMessage(cfg, db, recorder, stats)
+	c, err := newConsumer(ctx, cfg, "logs", channel, cfg.NSQLogConcurrency, handler)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return nil, err
+	}
+	if cleanup != nil {
+		c.onStop = append(c.onStop, cleanup)
+	}
+	return c, nil
 }
 
 func (c *NSQConsumer) Stop() {
@@ -45,18 +69,30 @@ func (c *NSQConsumer) Stop() {
 	}
 	c.consumer.Stop()
 	<-c.consumer.StopChan
+	for _, fn := range c.onStop {
+		if fn != nil {
+			fn()
+		}
+	}
 }
 
-func newConsumer(ctx context.Context, cfg config.Config, topic, channel string, handler nsq.HandlerFunc) (*NSQConsumer, error) {
+func newConsumer(ctx context.Context, cfg config.Config, topic, channel string, concurrency int, handler nsq.HandlerFunc) (*NSQConsumer, error) {
 	nsqCfg := nsq.NewConfig()
-	nsqCfg.MaxInFlight = 200
+	if cfg.NSQMaxInFlight > 0 {
+		nsqCfg.MaxInFlight = cfg.NSQMaxInFlight
+	} else {
+		nsqCfg.MaxInFlight = 200
+	}
 	nsqCfg.MsgTimeout = 30 * time.Second
 	cons, err := nsq.NewConsumer(topic, channel, nsqCfg)
 	if err != nil {
 		return nil, err
 	}
 	cons.SetLogger(log.New(log.Writer(), "nsq ", log.LstdFlags), nsq.LogLevelInfo)
-	cons.AddHandler(handler)
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	cons.AddConcurrentHandlers(handler, concurrency)
 
 	if err := connectToNSQDWithRetry(ctx, cons, cfg.NSQDAddress, topic, channel); err != nil {
 		cons.Stop()
@@ -99,10 +135,23 @@ func connectToNSQDWithRetry(ctx context.Context, cons *nsq.Consumer, addr, topic
 	}
 }
 
-func handleEventMessage(db *gorm.DB, recorder *metrics.RedisRecorder, geoip *enrich.GeoIP) nsq.HandlerFunc {
+func handleEventMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder, geoip *enrich.GeoIP, stats *obs.Stats) (nsq.HandlerFunc, func()) {
+	batcher := NewBatcher[model.Event](cfg.DBEventBatchSize, cfg.DBEventFlushInterval, 5*time.Second, func(ctx context.Context, rows []model.Event) error {
+		start := time.Now()
+		err := store.InsertEventsBatch(ctx, db, rows)
+		if stats != nil {
+			stats.ObserveDBFlush(len(rows), time.Since(start), err)
+		}
+		return err
+	})
+
 	return nsq.HandlerFunc(func(m *nsq.Message) error {
+		msgStart := time.Now()
 		var msg ingest.NSQMessage
 		if err := json.Unmarshal(m.Body, &msg); err != nil {
+			if stats != nil {
+				stats.ObserveConsumerMessage(time.Since(msgStart), nil)
+			}
 			return nil
 		}
 
@@ -112,35 +161,42 @@ func handleEventMessage(db *gorm.DB, recorder *metrics.RedisRecorder, geoip *enr
 			if err := json.Unmarshal(msg.Payload, &event); err != nil {
 				return nil
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			err := store.InsertEvent(ctx, db, msg.ProjectID, event)
+			row, err := store.EventRowFromMap(msg.ProjectID, event)
 			if err != nil {
+				if stats != nil {
+					stats.ObserveConsumerMessage(time.Since(msgStart), err)
+				}
 				return err
 			}
-			if recorder != nil {
-				if pid, err := project.ParseID(msg.ProjectID); err == nil {
-					distinctID, _ := identity.ExtractDistinctID(event)
-					deviceID := identity.ExtractDeviceID(event)
-					osName := identity.ExtractOS(event)
-					browser := identity.ExtractBrowser(event)
-					level, _ := event["level"].(string)
-					ts := identity.ExtractTimestamp(event, time.Now().UTC())
-					recorder.ObserveEvent(ctx, pid, level, distinctID, deviceID, osName, ts)
-					dims := map[string]string{
-						"os":      osName,
-						"browser": browser,
-					}
-					if geoip != nil && msg.Meta != nil && msg.Meta.ClientIP != "" {
-						if g, ok := geoip.Lookup(msg.Meta.ClientIP); ok {
-							dims["country"] = g.Country
-							dims["region"] = g.Region
-							dims["city"] = g.City
-							dims["asn_org"] = g.ASNOrg
-						}
-					}
-					recorder.ObserveEventDist(ctx, pid, ts, dims)
+
+			if err := batcher.Add(row); err != nil {
+				if stats != nil {
+					stats.ObserveConsumerMessage(time.Since(msgStart), err)
 				}
+				return err
+			}
+
+			if recorder != nil {
+				metricsCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				browser := identity.ExtractBrowser(event)
+				recorder.ObserveEvent(metricsCtx, row.ProjectID, row.Level, row.DistinctID, row.DeviceID, row.OS, row.Timestamp)
+				dims := map[string]string{
+					"os":      row.OS,
+					"browser": browser,
+				}
+				if geoip != nil && msg.Meta != nil && msg.Meta.ClientIP != "" {
+					if g, ok := geoip.Lookup(msg.Meta.ClientIP); ok {
+						dims["country"] = g.Country
+						dims["region"] = g.Region
+						dims["city"] = g.City
+						dims["asn_org"] = g.ASNOrg
+					}
+				}
+				recorder.ObserveEventDist(metricsCtx, row.ProjectID, row.Timestamp, dims)
+			}
+			if stats != nil {
+				stats.ObserveConsumerMessage(time.Since(msgStart), nil)
 			}
 			return nil
 		case "envelope":
@@ -149,30 +205,63 @@ func handleEventMessage(db *gorm.DB, recorder *metrics.RedisRecorder, geoip *enr
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 				return nil
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			err := store.InsertEvent(ctx, db, msg.ProjectID, payload)
+
+			row, err := store.EventRowFromMap(msg.ProjectID, payload)
 			if err != nil {
+				if stats != nil {
+					stats.ObserveConsumerMessage(time.Since(msgStart), err)
+				}
 				return err
+			}
+			if err := batcher.Add(row); err != nil {
+				if stats != nil {
+					stats.ObserveConsumerMessage(time.Since(msgStart), err)
+				}
+				return err
+			}
+			if stats != nil {
+				stats.ObserveConsumerMessage(time.Since(msgStart), nil)
 			}
 			return nil
 		default:
+			if stats != nil {
+				stats.ObserveConsumerMessage(time.Since(msgStart), nil)
+			}
 			return nil
 		}
-	})
+	}), batcher.Close
 }
 
-func handleLogMessage(db *gorm.DB, recorder *metrics.RedisRecorder) nsq.HandlerFunc {
+func handleLogMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder, stats *obs.Stats) (nsq.HandlerFunc, func()) {
+	batcher := NewBatcher[model.Log](cfg.DBLogBatchSize, cfg.DBLogFlushInterval, 5*time.Second, func(ctx context.Context, rows []model.Log) error {
+		start := time.Now()
+		err := store.InsertLogsAndTrackEventsBatch(ctx, db, rows)
+		if stats != nil {
+			stats.ObserveDBFlush(len(rows), time.Since(start), err)
+		}
+		return err
+	})
+
 	return nsq.HandlerFunc(func(m *nsq.Message) error {
+		msgStart := time.Now()
 		var msg ingest.NSQMessage
 		if err := json.Unmarshal(m.Body, &msg); err != nil {
+			if stats != nil {
+				stats.ObserveConsumerMessage(time.Since(msgStart), nil)
+			}
 			return nil
 		}
 		if msg.Type != "log" {
+			if stats != nil {
+				stats.ObserveConsumerMessage(time.Since(msgStart), nil)
+			}
 			return nil
 		}
 		var lp ingest.CustomLogPayload
 		if err := json.Unmarshal(msg.Payload, &lp); err != nil {
+			if stats != nil {
+				stats.ObserveConsumerMessage(time.Since(msgStart), nil)
+			}
 			return nil
 		}
 		if lp.Timestamp == nil {
@@ -180,28 +269,35 @@ func handleLogMessage(db *gorm.DB, recorder *metrics.RedisRecorder) nsq.HandlerF
 			lp.Timestamp = &now
 		}
 		if lp.Message == "" {
+			if stats != nil {
+				stats.ObserveConsumerMessage(time.Since(msgStart), nil)
+			}
 			return nil
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := store.InsertLog(ctx, db, msg.ProjectID, lp); err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
-				return err
+		var ingestID uuid.UUID
+		copy(ingestID[:], m.ID[:])
+		row, err := store.LogRowFromPayloadWithIngestID(msg.ProjectID, lp, ingestID)
+		if err != nil {
+			if stats != nil {
+				stats.ObserveConsumerMessage(time.Since(msgStart), err)
+			}
+			return err
+		}
+		if err := batcher.Add(row); err != nil {
+			if stats != nil {
+				stats.ObserveConsumerMessage(time.Since(msgStart), err)
 			}
 			return err
 		}
 		if recorder != nil {
-			if pid, err := project.ParseID(msg.ProjectID); err == nil {
-				distinctID := ""
-				if id := identity.ExtractUserID(map[string]any{"user": lp.User}); id != "" {
-					distinctID = id
-				} else if lp.DeviceID != "" {
-					distinctID = lp.DeviceID
-				}
-				recorder.ObserveLog(ctx, pid, lp.Level, distinctID, lp.DeviceID, *lp.Timestamp)
-			}
+			metricsCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			recorder.ObserveLog(metricsCtx, row.ProjectID, row.Level, row.DistinctID, row.DeviceID, row.Timestamp)
+		}
+		if stats != nil {
+			stats.ObserveConsumerMessage(time.Since(msgStart), nil)
 		}
 		return nil
-	})
+	}), batcher.Close
 }

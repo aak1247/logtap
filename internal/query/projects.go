@@ -95,6 +95,49 @@ func GetProjectHandler(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+func DeleteProjectHandler(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if db == nil {
+			respondErr(c, http.StatusNotImplemented, "database not configured")
+			return
+		}
+		uid := userIDFromGin(c)
+		if uid <= 0 {
+			respondErr(c, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		id, err := project.ParseID(c.Param("projectId"))
+		if err != nil {
+			respondErr(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+		defer cancel()
+
+		p, ok, err := store.GetProjectByID(ctx, db, id)
+		if err != nil {
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		if !ok || p.OwnerUserID != uid {
+			respondErr(c, http.StatusNotFound, "not found")
+			return
+		}
+
+		deleted, err := store.DeleteProject(ctx, db, id)
+		if err != nil {
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		if !deleted {
+			respondErr(c, http.StatusNotFound, "not found")
+			return
+		}
+		respondOK(c, gin.H{"deleted": true})
+	}
+}
+
 func ListProjectKeysHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if db == nil {

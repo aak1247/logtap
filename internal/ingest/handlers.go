@@ -171,6 +171,7 @@ func CustomLogHandler(publisher queue.Publisher) gin.HandlerFunc {
 		}
 		now := time.Now().UTC()
 
+		bodies := make([][]byte, 0, len(items))
 		for _, logPayload := range items {
 			if strings.TrimSpace(logPayload.Message) == "" {
 				c.Status(http.StatusBadRequest)
@@ -194,12 +195,25 @@ func CustomLogHandler(publisher queue.Publisher) gin.HandlerFunc {
 					UserAgent: c.GetHeader("User-Agent"),
 				},
 			})
-			if err := publisher.Publish("logs", payload); err != nil {
+			bodies = append(bodies, payload)
+		}
+
+		if bp, ok := publisher.(queue.BatchPublisher); ok && len(bodies) > 1 {
+			for _, chunk := range chunkBytes(bodies, 100) {
+				if err := bp.MultiPublish("logs", chunk); err != nil {
+					c.Status(http.StatusServiceUnavailable)
+					return
+				}
+			}
+			c.Status(http.StatusAccepted)
+			return
+		}
+		for _, b := range bodies {
+			if err := publisher.Publish("logs", b); err != nil {
 				c.Status(http.StatusServiceUnavailable)
 				return
 			}
 		}
-
 		c.Status(http.StatusAccepted)
 	}
 }
@@ -219,6 +233,7 @@ func TrackEventHandler(publisher queue.Publisher) gin.HandlerFunc {
 		}
 		now := time.Now().UTC()
 
+		bodies := make([][]byte, 0, len(items))
 		for _, ev := range items {
 			name := strings.TrimSpace(ev.Name)
 			if name == "" {
@@ -254,12 +269,25 @@ func TrackEventHandler(publisher queue.Publisher) gin.HandlerFunc {
 					UserAgent: c.GetHeader("User-Agent"),
 				},
 			})
-			if err := publisher.Publish("logs", payload); err != nil {
+			bodies = append(bodies, payload)
+		}
+
+		if bp, ok := publisher.(queue.BatchPublisher); ok && len(bodies) > 1 {
+			for _, chunk := range chunkBytes(bodies, 100) {
+				if err := bp.MultiPublish("logs", chunk); err != nil {
+					c.Status(http.StatusServiceUnavailable)
+					return
+				}
+			}
+			c.Status(http.StatusAccepted)
+			return
+		}
+		for _, b := range bodies {
+			if err := publisher.Publish("logs", b); err != nil {
 				c.Status(http.StatusServiceUnavailable)
 				return
 			}
 		}
-
 		c.Status(http.StatusAccepted)
 	}
 }
@@ -305,4 +333,19 @@ func readBody(c *gin.Context, limit int64) ([]byte, error) {
 		return io.ReadAll(io.LimitReader(zr, limit))
 	}
 	return io.ReadAll(raw)
+}
+
+func chunkBytes(items [][]byte, maxN int) [][][]byte {
+	if maxN <= 0 || len(items) <= maxN {
+		return [][][]byte{items}
+	}
+	chunks := make([][][]byte, 0, (len(items)+maxN-1)/maxN)
+	for i := 0; i < len(items); i += maxN {
+		j := i + maxN
+		if j > len(items) {
+			j = len(items)
+		}
+		chunks = append(chunks, items[i:j])
+	}
+	return chunks
 }

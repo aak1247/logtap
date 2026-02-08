@@ -40,6 +40,10 @@ export interface LogtapClientOptions {
   baseUrl: string;
   projectId: number | string;
   projectKey?: string;
+  persistQueue?: boolean;
+  queueStorageKey?: string;
+  queueFilePath?: string;
+  persistDebounceMs?: number;
   flushIntervalMs?: number;
   minBatchSize?: number;
   immediateEvents?: string[];

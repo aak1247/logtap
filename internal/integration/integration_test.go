@@ -90,7 +90,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	}
 	publisher := &testPublisher{db: db}
 
-	srv := httpserver.New(cfg, publisher, db, nil)
+	srv := httpserver.New(cfg, publisher, db, nil, nil)
 	ts := httptest.NewServer(srv.Handler)
 	t.Cleanup(ts.Close)
 	return ts

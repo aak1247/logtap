@@ -12,11 +12,41 @@ import (
 )
 
 type RedisRecorder struct {
-	rdb *redis.Client
+	rdb      *redis.Client
+	dayTTL   time.Duration
+	distTTL  time.Duration
+	monthTTL time.Duration
 }
 
-func NewRedisRecorder(rdb *redis.Client) *RedisRecorder {
-	return &RedisRecorder{rdb: rdb}
+type RecorderOption func(*RedisRecorder)
+
+func WithTTLs(dayTTL, distTTL, monthTTL time.Duration) RecorderOption {
+	return func(r *RedisRecorder) {
+		if dayTTL > 0 {
+			r.dayTTL = dayTTL
+		}
+		if distTTL > 0 {
+			r.distTTL = distTTL
+		}
+		if monthTTL > 0 {
+			r.monthTTL = monthTTL
+		}
+	}
+}
+
+func NewRedisRecorder(rdb *redis.Client, opts ...RecorderOption) *RedisRecorder {
+	r := &RedisRecorder{
+		rdb:      rdb,
+		dayTTL:   180 * 24 * time.Hour,
+		distTTL:  90 * 24 * time.Hour,
+		monthTTL: 18 * 31 * 24 * time.Hour,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(r)
+		}
+	}
+	return r
 }
 
 func (r *RedisRecorder) ObserveEvent(ctx context.Context, projectID int, level string, distinctID string, deviceID string, osName string, ts time.Time) {
@@ -30,19 +60,40 @@ func (r *RedisRecorder) ObserveEvent(ctx context.Context, projectID int, level s
 	osName = strings.TrimSpace(osName)
 
 	pipe := r.rdb.Pipeline()
-	pipe.Incr(ctx, fmt.Sprintf("metrics:events:%d:%s", projectID, date))
+	expire := map[string]time.Duration{}
+	eventsDayKey := fmt.Sprintf("metrics:events:%d:%s", projectID, date)
+	pipe.Incr(ctx, eventsDayKey)
+	expire[eventsDayKey] = r.dayTTL
+
+	pipe.Incr(ctx, fmt.Sprintf("metrics:events:%d:total", projectID))
 	if level == "error" || level == "fatal" {
-		pipe.Incr(ctx, fmt.Sprintf("metrics:errors:%d:%s", projectID, date))
+		errorsDayKey := fmt.Sprintf("metrics:errors:%d:%s", projectID, date)
+		pipe.Incr(ctx, errorsDayKey)
+		expire[errorsDayKey] = r.dayTTL
+		pipe.Incr(ctx, fmt.Sprintf("metrics:errors:%d:total", projectID))
 	}
 	if distinctID != "" {
-		pipe.PFAdd(ctx, fmt.Sprintf("active:dau:%d:%s", projectID, date), distinctID)
-		pipe.PFAdd(ctx, fmt.Sprintf("active:mau:%d:%s", projectID, month), distinctID)
-		pipe.PFAdd(ctx, fmt.Sprintf("metrics:users:%d:%s", projectID, date), distinctID)
+		dauKey := fmt.Sprintf("active:dau:%d:%s", projectID, date)
+		pipe.PFAdd(ctx, dauKey, distinctID)
+		expire[dauKey] = r.dayTTL
+
+		mauKey := fmt.Sprintf("active:mau:%d:%s", projectID, month)
+		pipe.PFAdd(ctx, mauKey, distinctID)
+		expire[mauKey] = r.monthTTL
+
+		usersDayKey := fmt.Sprintf("metrics:users:%d:%s", projectID, date)
+		pipe.PFAdd(ctx, usersDayKey, distinctID)
+		expire[usersDayKey] = r.dayTTL
+
+		pipe.PFAdd(ctx, fmt.Sprintf("metrics:users:%d:total", projectID), distinctID)
 	}
 	if deviceID != "" {
-		pipe.PFAdd(ctx, fmt.Sprintf("active:devices:%d:%s", projectID, date), deviceID)
+		devKey := fmt.Sprintf("active:devices:%d:%s", projectID, date)
+		pipe.PFAdd(ctx, devKey, deviceID)
+		expire[devKey] = r.dayTTL
 	}
 	_, _ = pipe.Exec(ctx)
+	r.expireKeys(ctx, expire)
 }
 
 func (r *RedisRecorder) ObserveEventDist(ctx context.Context, projectID int, ts time.Time, dims map[string]string) {
@@ -52,14 +103,18 @@ func (r *RedisRecorder) ObserveEventDist(ctx context.Context, projectID int, ts 
 	date := ts.UTC().Format("2006-01-02")
 
 	pipe := r.rdb.Pipeline()
+	expire := map[string]time.Duration{}
 	for dim, key := range dims {
 		key = strings.TrimSpace(key)
 		if key == "" {
 			continue
 		}
-		pipe.HIncrBy(ctx, fmt.Sprintf("dist:%s:%d:%s", dim, projectID, date), key, 1)
+		hashKey := fmt.Sprintf("dist:%s:%d:%s", dim, projectID, date)
+		pipe.HIncrBy(ctx, hashKey, key, 1)
+		expire[hashKey] = r.distTTL
 	}
 	_, _ = pipe.Exec(ctx)
+	r.expireKeys(ctx, expire)
 }
 
 func (r *RedisRecorder) ObserveLog(ctx context.Context, projectID int, level string, distinctID string, deviceID string, ts time.Time) {
@@ -72,39 +127,210 @@ func (r *RedisRecorder) ObserveLog(ctx context.Context, projectID int, level str
 	deviceID = strings.TrimSpace(deviceID)
 
 	pipe := r.rdb.Pipeline()
-	pipe.Incr(ctx, fmt.Sprintf("metrics:logs:%d:%s", projectID, date))
+	expire := map[string]time.Duration{}
+	logsDayKey := fmt.Sprintf("metrics:logs:%d:%s", projectID, date)
+	pipe.Incr(ctx, logsDayKey)
+	expire[logsDayKey] = r.dayTTL
+
+	pipe.Incr(ctx, fmt.Sprintf("metrics:logs:%d:total", projectID))
 	if distinctID != "" {
-		pipe.PFAdd(ctx, fmt.Sprintf("active:dau:%d:%s", projectID, date), distinctID)
-		pipe.PFAdd(ctx, fmt.Sprintf("active:mau:%d:%s", projectID, month), distinctID)
-		pipe.PFAdd(ctx, fmt.Sprintf("metrics:users:%d:%s", projectID, date), distinctID)
+		dauKey := fmt.Sprintf("active:dau:%d:%s", projectID, date)
+		pipe.PFAdd(ctx, dauKey, distinctID)
+		expire[dauKey] = r.dayTTL
+
+		mauKey := fmt.Sprintf("active:mau:%d:%s", projectID, month)
+		pipe.PFAdd(ctx, mauKey, distinctID)
+		expire[mauKey] = r.monthTTL
+
+		usersDayKey := fmt.Sprintf("metrics:users:%d:%s", projectID, date)
+		pipe.PFAdd(ctx, usersDayKey, distinctID)
+		expire[usersDayKey] = r.dayTTL
+
+		pipe.PFAdd(ctx, fmt.Sprintf("metrics:users:%d:total", projectID), distinctID)
 	}
 	if deviceID != "" {
-		pipe.PFAdd(ctx, fmt.Sprintf("active:devices:%d:%s", projectID, date), deviceID)
+		devKey := fmt.Sprintf("active:devices:%d:%s", projectID, date)
+		pipe.PFAdd(ctx, devKey, deviceID)
+		expire[devKey] = r.dayTTL
+	}
+	_, _ = pipe.Exec(ctx)
+	r.expireKeys(ctx, expire)
+}
+
+func (r *RedisRecorder) expireKeys(ctx context.Context, keys map[string]time.Duration) {
+	if r == nil || r.rdb == nil || len(keys) == 0 {
+		return
+	}
+	pipe := r.rdb.Pipeline()
+	for k, ttl := range keys {
+		if strings.TrimSpace(k) == "" || ttl <= 0 {
+			continue
+		}
+		pipe.Expire(ctx, k, ttl)
 	}
 	_, _ = pipe.Exec(ctx)
 }
 
-func (r *RedisRecorder) Today(ctx context.Context, projectID int, now time.Time) (events int64, errors int64, users int64, ok bool, err error) {
+func (r *RedisRecorder) Today(ctx context.Context, projectID int, now time.Time) (logs int64, events int64, errors int64, users int64, ok bool, err error) {
 	if r == nil || r.rdb == nil {
-		return 0, 0, 0, false, nil
+		return 0, 0, 0, 0, false, nil
 	}
 	date := now.UTC().Format("2006-01-02")
+	logsKey := fmt.Sprintf("metrics:logs:%d:%s", projectID, date)
 	eventsKey := fmt.Sprintf("metrics:events:%d:%s", projectID, date)
 	errorsKey := fmt.Sprintf("metrics:errors:%d:%s", projectID, date)
 	usersKey := fmt.Sprintf("metrics:users:%d:%s", projectID, date)
 
 	pipe := r.rdb.Pipeline()
+	logsCmd := pipe.Get(ctx, logsKey)
 	eventsCmd := pipe.Get(ctx, eventsKey)
 	errorsCmd := pipe.Get(ctx, errorsKey)
 	usersCmd := pipe.PFCount(ctx, usersKey)
 	_, err = pipe.Exec(ctx)
 	if err != nil && err != redis.Nil {
-		return 0, 0, 0, true, err
+		return 0, 0, 0, 0, true, err
 	}
+	logs, _ = logsCmd.Int64()
 	events, _ = eventsCmd.Int64()
 	errors, _ = errorsCmd.Int64()
 	users, _ = usersCmd.Result()
-	return events, errors, users, true, nil
+	return logs, events, errors, users, true, nil
+}
+
+func (r *RedisRecorder) Total(ctx context.Context, projectID int) (logs int64, events int64, users int64, ok bool, err error) {
+	if r == nil || r.rdb == nil {
+		return 0, 0, 0, false, nil
+	}
+	if err := r.ensureTotals(ctx, projectID); err != nil {
+		return 0, 0, 0, true, err
+	}
+
+	logsKey := fmt.Sprintf("metrics:logs:%d:total", projectID)
+	eventsKey := fmt.Sprintf("metrics:events:%d:total", projectID)
+	usersKey := fmt.Sprintf("metrics:users:%d:total", projectID)
+
+	pipe := r.rdb.Pipeline()
+	logsCmd := pipe.Get(ctx, logsKey)
+	eventsCmd := pipe.Get(ctx, eventsKey)
+	usersCmd := pipe.PFCount(ctx, usersKey)
+	_, err = pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		return 0, 0, 0, true, err
+	}
+	logs, _ = logsCmd.Int64()
+	events, _ = eventsCmd.Int64()
+	users, _ = usersCmd.Result()
+	return logs, events, users, true, nil
+}
+
+func (r *RedisRecorder) ensureTotals(ctx context.Context, projectID int) error {
+	if r == nil || r.rdb == nil {
+		return nil
+	}
+	readyKey := fmt.Sprintf("metrics:totals:%d:ready", projectID)
+	if ok, _ := r.rdb.Get(ctx, readyKey).Result(); ok == "1" {
+		return nil
+	}
+
+	logsTotal, err := r.sumByKeyPattern(ctx, fmt.Sprintf("metrics:logs:%d:*", projectID), func(key string) bool {
+		return strings.HasSuffix(key, ":total")
+	})
+	if err != nil {
+		return err
+	}
+	eventsTotal, err := r.sumByKeyPattern(ctx, fmt.Sprintf("metrics:events:%d:*", projectID), func(key string) bool {
+		return strings.HasSuffix(key, ":total")
+	})
+	if err != nil {
+		return err
+	}
+
+	// Merge all daily HLLs into the total HLL, so upgrades can still show a sensible value.
+	usersTotalKey := fmt.Sprintf("metrics:users:%d:total", projectID)
+	if err := r.pfmergeByKeyPattern(ctx, usersTotalKey, fmt.Sprintf("metrics:users:%d:*", projectID), func(key string) bool {
+		return strings.HasSuffix(key, ":total")
+	}); err != nil {
+		return err
+	}
+
+	pipe := r.rdb.Pipeline()
+	pipe.Set(ctx, fmt.Sprintf("metrics:logs:%d:total", projectID), logsTotal, 0)
+	pipe.Set(ctx, fmt.Sprintf("metrics:events:%d:total", projectID), eventsTotal, 0)
+	pipe.Set(ctx, readyKey, "1", 0)
+	_, err = pipe.Exec(ctx)
+	return err
+}
+
+func (r *RedisRecorder) sumByKeyPattern(
+	ctx context.Context,
+	pattern string,
+	skip func(key string) bool,
+) (int64, error) {
+	var (
+		cursor uint64
+		total  int64
+	)
+	for {
+		keys, nextCursor, err := r.rdb.Scan(ctx, cursor, pattern, 500).Result()
+		if err != nil {
+			return 0, err
+		}
+		if len(keys) > 0 {
+			pipe := r.rdb.Pipeline()
+			cmds := make([]*redis.StringCmd, 0, len(keys))
+			for _, k := range keys {
+				if skip != nil && skip(k) {
+					continue
+				}
+				cmds = append(cmds, pipe.Get(ctx, k))
+			}
+			_, execErr := pipe.Exec(ctx)
+			if execErr != nil && execErr != redis.Nil {
+				return 0, execErr
+			}
+			for _, cmd := range cmds {
+				n, _ := cmd.Int64()
+				total += n
+			}
+		}
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+	return total, nil
+}
+
+func (r *RedisRecorder) pfmergeByKeyPattern(
+	ctx context.Context,
+	destKey string,
+	pattern string,
+	skip func(key string) bool,
+) error {
+	var cursor uint64
+	for {
+		keys, nextCursor, err := r.rdb.Scan(ctx, cursor, pattern, 500).Result()
+		if err != nil {
+			return err
+		}
+		var src []string
+		for _, k := range keys {
+			if skip != nil && skip(k) {
+				continue
+			}
+			src = append(src, k)
+		}
+		if len(src) > 0 {
+			if err := r.rdb.PFMerge(ctx, destKey, src...).Err(); err != nil && err != redis.Nil {
+				return err
+			}
+		}
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+	return nil
 }
 
 type BucketCount struct {
@@ -128,6 +354,13 @@ type RetentionRow struct {
 	CohortSize int64            `json:"cohort_size"`
 	Points     []RetentionPoint `json:"points"`
 }
+
+var pfUnionCountScript = `
+redis.call('PFMERGE', KEYS[1], KEYS[2], KEYS[3])
+local n = redis.call('PFCOUNT', KEYS[1])
+redis.call('DEL', KEYS[1])
+return n
+`
 
 func (r *RedisRecorder) Distribution(ctx context.Context, projectID int, dim string, start, end time.Time, limit int) ([]DistItem, error) {
 	if r == nil || r.rdb == nil {
@@ -221,7 +454,7 @@ func (r *RedisRecorder) Retention(ctx context.Context, projectID int, start, end
 		cohort time.Time
 		a      *redis.IntCmd
 		b      map[int]*redis.IntCmd
-		u      map[int]*redis.IntCmd
+		u      map[int]*redis.Cmd
 	}
 	var cmds []rowCmds
 
@@ -236,13 +469,14 @@ func (r *RedisRecorder) Retention(ctx context.Context, projectID int, start, end
 			cohort: cur,
 			a:      pipe.PFCount(ctx, aKey),
 			b:      map[int]*redis.IntCmd{},
-			u:      map[int]*redis.IntCmd{},
+			u:      map[int]*redis.Cmd{},
 		}
 		for _, d := range offsets {
 			t := cur.AddDate(0, 0, d).Format("2006-01-02")
 			bKey := fmt.Sprintf("active:dau:%d:%s", projectID, t)
 			rc.b[d] = pipe.PFCount(ctx, bKey)
-			rc.u[d] = pipe.PFCount(ctx, aKey, bKey) // union cardinality
+			tmpKey := fmt.Sprintf("tmp:pfu:%d:%d:%d", projectID, cur.UnixNano(), d)
+			rc.u[d] = pipe.Eval(ctx, pfUnionCountScript, []string{tmpKey, aKey, bKey})
 		}
 		cmds = append(cmds, rc)
 		cur = cur.AddDate(0, 0, 1)
@@ -260,7 +494,7 @@ func (r *RedisRecorder) Retention(ctx context.Context, projectID int, start, end
 		}
 		for _, d := range offsets {
 			b, _ := rc.b[d].Result()
-			u, _ := rc.u[d].Result()
+			u, _ := rc.u[d].Int64()
 			inter := a + b - u
 			if inter < 0 {
 				inter = 0

@@ -37,6 +37,21 @@ client.Track("purchase", map[string]any{"amount": 1}, &logtap.TrackOptions{Immed
 _ = client.Flush(context.Background())
 ```
 
+## 本地持久化队列（可选）
+
+开启后，未发送成功的日志/事件会写入本地文件；应用重启后会自动加载并继续发送：
+
+```go
+client, _ := logtap.NewClient(logtap.ClientOptions{
+  BaseURL:      "http://localhost:8080",
+  ProjectID:    1,
+  ProjectKey:   "pk_xxx",
+  PersistQueue: true,
+  // QueueFilePath: "/path/to/logtap-queue.json", // 可选：自定义位置
+})
+defer client.Close(context.Background())
+```
+
 ## Panic 捕获（可选）
 
 ```go

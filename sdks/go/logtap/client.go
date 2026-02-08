@@ -29,6 +29,12 @@ type ClientOptions struct {
 
 	ProjectKey string
 
+	// PersistQueue enables a local persistent queue so logs/events can survive process restarts.
+	// By default it stores to a JSON file in the user's cache dir (or temp dir as fallback).
+	PersistQueue    bool
+	QueueFilePath   string
+	PersistDebounce time.Duration
+
 	FlushInterval time.Duration
 	MinBatchSize  int
 	MaxBatchSize  int
@@ -96,6 +102,12 @@ type Client struct {
 	done    chan struct{}
 	wg      sync.WaitGroup
 	closed  bool
+
+	queueStore      *diskQueueStore
+	persistDebounce time.Duration
+	persistMu       sync.Mutex
+	persistTimer    *time.Timer
+	persistWriteMu  sync.Mutex
 }
 
 type flushRequest struct {
@@ -190,6 +202,20 @@ func NewClient(options ClientOptions) (*Client, error) {
 		done:    make(chan struct{}),
 	}
 
+	if options.PersistDebounce > 0 {
+		c.persistDebounce = options.PersistDebounce
+	} else {
+		c.persistDebounce = 0
+	}
+	if options.PersistQueue {
+		path := strings.TrimSpace(options.QueueFilePath)
+		if path == "" {
+			path = defaultQueueFilePath(options.ProjectID)
+		}
+		c.queueStore = &diskQueueStore{path: path}
+		c.loadPersistedQueue()
+	}
+
 	if c.flushInterval > 0 {
 		c.ticker = time.NewTicker(c.flushInterval)
 	}
@@ -215,6 +241,15 @@ func NewClient(options ClientOptions) (*Client, error) {
 			}
 		}
 	}()
+
+	if c.queueStore != nil {
+		c.mu.Lock()
+		queued := len(c.logQueue) + len(c.trackQueue)
+		c.mu.Unlock()
+		if queued > 0 {
+			c.signalRetry()
+		}
+	}
 
 	return c, nil
 }
@@ -432,12 +467,7 @@ func (c *Client) Track(name string, properties map[string]any, opts *TrackOption
 	}
 
 	if immediate || c.isImmediateEvent(n, payload) {
-		ok, err := c.postJSON(context.Background(), "/track/", []TrackEventPayload{payload})
-		if err == nil && ok {
-			return
-		}
 		c.enqueueTrack(payload)
-		c.bumpBackoff()
 		c.signalRetry()
 		return
 	}
@@ -504,6 +534,7 @@ func (c *Client) enqueueLog(payload LogPayload) {
 	}
 	shouldSignal = c.minBatchSize > 1 && (len(c.logQueue)+len(c.trackQueue)) >= c.minBatchSize
 	c.mu.Unlock()
+	c.schedulePersist()
 	if shouldSignal {
 		c.signalFlush()
 	}
@@ -521,6 +552,7 @@ func (c *Client) enqueueTrack(payload TrackEventPayload) {
 	}
 	shouldSignal = c.minBatchSize > 1 && (len(c.logQueue)+len(c.trackQueue)) >= c.minBatchSize
 	c.mu.Unlock()
+	c.schedulePersist()
 	if shouldSignal {
 		c.signalFlush()
 	}
@@ -583,13 +615,13 @@ func (c *Client) Flush(ctx context.Context) error {
 
 		sentAny := false
 
-		if ok, err := c.flushLogsOnce(ctx); err != nil {
+		if ok, err := c.flushTrackOnce(ctx); err != nil {
 			return err
 		} else if ok {
 			sentAny = true
 		}
 
-		if ok, err := c.flushTrackOnce(ctx); err != nil {
+		if ok, err := c.flushLogsOnce(ctx); err != nil {
 			return err
 		} else if ok {
 			sentAny = true
@@ -624,7 +656,9 @@ func (c *Client) Close(ctx context.Context) error {
 	c.mu.Unlock()
 
 	c.wg.Wait()
-	return c.Flush(ctx)
+	err := c.Flush(ctx)
+	c.stopPersist()
+	return err
 }
 
 func (c *Client) waitBackoff(ctx context.Context) error {
@@ -645,12 +679,11 @@ func (c *Client) waitBackoff(ctx context.Context) error {
 }
 
 func (c *Client) flushLogsOnce(ctx context.Context) (bool, error) {
-	batch := c.dequeueLogs()
+	batch := c.peekLogs()
 	if len(batch) == 0 {
 		return false, nil
 	}
 	if ok, err := c.postJSON(ctx, "/logs/", batch); err != nil || !ok {
-		c.requeueLogsFront(batch)
 		c.bumpBackoff()
 		c.signalRetry()
 		if err != nil {
@@ -658,16 +691,17 @@ func (c *Client) flushLogsOnce(ctx context.Context) (bool, error) {
 		}
 		return false, errors.New("logtap: failed to post logs batch")
 	}
+	c.dropLogs(len(batch))
+	c.schedulePersist()
 	return true, nil
 }
 
 func (c *Client) flushTrackOnce(ctx context.Context) (bool, error) {
-	batch := c.dequeueTrack()
+	batch := c.peekTrack()
 	if len(batch) == 0 {
 		return false, nil
 	}
 	if ok, err := c.postJSON(ctx, "/track/", batch); err != nil || !ok {
-		c.requeueTrackFront(batch)
 		c.bumpBackoff()
 		c.signalRetry()
 		if err != nil {
@@ -675,10 +709,12 @@ func (c *Client) flushTrackOnce(ctx context.Context) (bool, error) {
 		}
 		return false, errors.New("logtap: failed to post track batch")
 	}
+	c.dropTrack(len(batch))
+	c.schedulePersist()
 	return true, nil
 }
 
-func (c *Client) dequeueLogs() []LogPayload {
+func (c *Client) peekLogs() []LogPayload {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.logQueue) == 0 {
@@ -689,11 +725,10 @@ func (c *Client) dequeueLogs() []LogPayload {
 		n = len(c.logQueue)
 	}
 	batch := append([]LogPayload(nil), c.logQueue[:n]...)
-	c.logQueue = c.logQueue[n:]
 	return batch
 }
 
-func (c *Client) dequeueTrack() []TrackEventPayload {
+func (c *Client) peekTrack() []TrackEventPayload {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.trackQueue) == 0 {
@@ -704,32 +739,33 @@ func (c *Client) dequeueTrack() []TrackEventPayload {
 		n = len(c.trackQueue)
 	}
 	batch := append([]TrackEventPayload(nil), c.trackQueue[:n]...)
-	c.trackQueue = c.trackQueue[n:]
 	return batch
 }
 
-func (c *Client) requeueLogsFront(batch []LogPayload) {
-	if len(batch) == 0 {
-		return
-	}
+func (c *Client) dropLogs(n int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.logQueue = append(append([]LogPayload(nil), batch...), c.logQueue...)
-	if len(c.logQueue) > c.maxQueueSize {
-		c.logQueue = append([]LogPayload(nil), c.logQueue[len(c.logQueue)-c.maxQueueSize:]...)
+	if n <= 0 {
+		return
 	}
+	if n >= len(c.logQueue) {
+		c.logQueue = nil
+		return
+	}
+	c.logQueue = c.logQueue[n:]
 }
 
-func (c *Client) requeueTrackFront(batch []TrackEventPayload) {
-	if len(batch) == 0 {
-		return
-	}
+func (c *Client) dropTrack(n int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.trackQueue = append(append([]TrackEventPayload(nil), batch...), c.trackQueue...)
-	if len(c.trackQueue) > c.maxQueueSize {
-		c.trackQueue = append([]TrackEventPayload(nil), c.trackQueue[len(c.trackQueue)-c.maxQueueSize:]...)
+	if n <= 0 {
+		return
 	}
+	if n >= len(c.trackQueue) {
+		c.trackQueue = nil
+		return
+	}
+	c.trackQueue = c.trackQueue[n:]
 }
 
 func (c *Client) bumpBackoff() {

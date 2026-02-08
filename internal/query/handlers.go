@@ -119,6 +119,7 @@ func SearchLogsHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		q := strings.TrimSpace(c.Query("q"))
+		mode := strings.ToLower(strings.TrimSpace(c.Query("mode")))
 		traceID := strings.TrimSpace(c.Query("trace_id"))
 		level := strings.TrimSpace(c.Query("level"))
 		start, _ := parseTime(c.Query("start"))
@@ -142,8 +143,16 @@ func SearchLogsHandler(db *gorm.DB) gin.HandlerFunc {
 			qdb = qdb.Where("level = ?", level)
 		}
 		if q != "" {
-			pat := "%" + q + "%"
-			qdb = qdb.Where(db.Where("message ILIKE ?", pat).Or("fields::text ILIKE ?", pat))
+			useFTS := (mode == "" || mode == "fts") && strings.EqualFold(db.Dialector.Name(), "postgres")
+			if useFTS {
+				qdb = qdb.Where(
+					"to_tsvector('simple', coalesce(message,'') || ' ' || coalesce(fields::text,'')) @@ plainto_tsquery('simple', ?)",
+					q,
+				)
+			} else {
+				pat := "%" + q + "%"
+				qdb = qdb.Where(db.Where("message ILIKE ?", pat).Or("fields::text ILIKE ?", pat))
+			}
 		}
 
 		type row struct {

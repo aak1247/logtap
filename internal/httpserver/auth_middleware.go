@@ -2,8 +2,10 @@ package httpserver
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aak1247/logtap/internal/auth"
@@ -37,6 +39,17 @@ func RequireUser(secret []byte) gin.HandlerFunc {
 	}
 }
 
+func RequireUserOrProxy(secret []byte) gin.HandlerFunc {
+	requireUser := RequireUser(secret)
+	return func(c *gin.Context) {
+		if proxyOK(c) {
+			c.Next()
+			return
+		}
+		requireUser(c)
+	}
+}
+
 func userIDFromContext(c *gin.Context) (int64, bool) {
 	v, ok := c.Get(ctxUserIDKey)
 	if !ok {
@@ -48,6 +61,10 @@ func userIDFromContext(c *gin.Context) (int64, bool) {
 
 func RequireProjectOwner(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if proxyOK(c) {
+			c.Next()
+			return
+		}
 		if db == nil {
 			c.Status(http.StatusNotImplemented)
 			c.Abort()
@@ -81,7 +98,12 @@ func RequireProjectOwner(db *gorm.DB) gin.HandlerFunc {
 }
 
 func RequireProjectKey(db *gorm.DB) gin.HandlerFunc {
+	cache := newProjectKeyCache(10_000, 30*time.Second)
 	return func(c *gin.Context) {
+		if proxyOK(c) {
+			c.Next()
+			return
+		}
 		if db == nil {
 			c.Status(http.StatusNotImplemented)
 			c.Abort()
@@ -117,12 +139,24 @@ func RequireProjectKey(db *gorm.DB) gin.HandlerFunc {
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		defer cancel()
+		if v, hit := cache.Get(pid, key); hit {
+			if !v {
+				c.Status(http.StatusUnauthorized)
+				c.Abort()
+				return
+			}
+			c.Next()
+			return
+		}
+
 		ok, err := store.ValidateProjectKey(ctx, db, pid, key)
 		if err != nil || !ok {
+			cache.Set(pid, key, false)
 			c.Status(http.StatusUnauthorized)
 			c.Abort()
 			return
 		}
+		cache.Set(pid, key, true)
 		c.Next()
 	}
 }
@@ -152,4 +186,84 @@ func sentryKeyFromHeader(h string) string {
 		}
 	}
 	return ""
+}
+
+type projectKeyCache struct {
+	mu        sync.Mutex
+	items     map[string]cacheEntry
+	maxItems  int
+	ttl       time.Duration
+	lastPrune time.Time
+}
+
+type cacheEntry struct {
+	ok    bool
+	until time.Time
+}
+
+func newProjectKeyCache(maxItems int, ttl time.Duration) *projectKeyCache {
+	if maxItems <= 0 {
+		maxItems = 10_000
+	}
+	if ttl <= 0 {
+		ttl = 30 * time.Second
+	}
+	return &projectKeyCache{
+		items:    map[string]cacheEntry{},
+		maxItems: maxItems,
+		ttl:      ttl,
+	}
+}
+
+func (c *projectKeyCache) key(projectID int, key string) string {
+	return fmt.Sprintf("%d:%s", projectID, key)
+}
+
+func (c *projectKeyCache) Get(projectID int, key string) (bool, bool) {
+	if c == nil {
+		return false, false
+	}
+	now := time.Now()
+	k := c.key(projectID, key)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.items[k]
+	if !ok {
+		return false, false
+	}
+	if now.After(e.until) {
+		delete(c.items, k)
+		return false, false
+	}
+	return e.ok, true
+}
+
+func (c *projectKeyCache) Set(projectID int, key string, ok bool) {
+	if c == nil {
+		return
+	}
+	now := time.Now()
+	k := c.key(projectID, key)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.items[k] = cacheEntry{ok: ok, until: now.Add(c.ttl)}
+
+	if len(c.items) <= c.maxItems && now.Sub(c.lastPrune) < time.Minute {
+		return
+	}
+	c.lastPrune = now
+	for kk, e := range c.items {
+		if now.After(e.until) {
+			delete(c.items, kk)
+		}
+	}
+	for len(c.items) > c.maxItems {
+		for kk := range c.items {
+			delete(c.items, kk)
+			break
+		}
+	}
 }

@@ -4,10 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/nsqd --broadcast-address=127.0.0.1
+ExecStart=/usr/local/bin/nsqd --broadcast-address=127.0.0.1 --max-msg-size=26214400
 Restart=on-failure
 RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
-

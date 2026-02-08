@@ -4,10 +4,21 @@ type Settings = {
   projectId: string;
 };
 
-const key = "logtap:settings:v1";
+const legacyKey = "logtap:settings:v1";
 const settingsChangedEvent = "logtap:settings-changed";
 
 let cachedSettings: Settings | null = null;
+
+export function normalizeApiBase(raw: string): string {
+  let base = raw.trim();
+  if (base && !base.includes("://") && !base.startsWith("/")) {
+    base = `http://${base}`;
+  }
+  base = base.replace(/\/+$/, "");
+  base = base.replace(/\/api\/?$/, "");
+  base = base.replace(/\/+$/, "");
+  return base;
+}
 
 function sameSettings(a: Settings, b: Settings): boolean {
   return a.apiBase === b.apiBase && a.token === b.token && a.projectId === b.projectId;
@@ -23,12 +34,20 @@ function getRuntimeApiBase(): string {
   return `${protocol}//${host}`;
 }
 
+function getSettingsStorageKey(): string {
+  const configured = (import.meta.env.VITE_SETTINGS_STORAGE_KEY as string | undefined) ?? "";
+  const base = configured.trim() || legacyKey;
+  const runtime = getRuntimeApiBase();
+  if (!runtime) return base;
+  return `${base}:${runtime}`;
+}
+
 export function loadSettings(): Settings {
   const apiBase = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
   const projectId =
     (import.meta.env.VITE_DEFAULT_PROJECT_ID as string | undefined) ?? "";
   const runtimeApiBase = getRuntimeApiBase();
-  const fallbackApiBase = runtimeApiBase || apiBase || "http://localhost:8080";
+  const fallbackApiBase = normalizeApiBase(runtimeApiBase || apiBase || "http://localhost:8080");
 
   if (typeof window === "undefined") {
     const next = { apiBase: fallbackApiBase, token: "", projectId };
@@ -38,21 +57,21 @@ export function loadSettings(): Settings {
   }
 
   try {
-    const raw = localStorage.getItem(key);
-    if (!raw)
-      {
-        const next = {
+    const key = getSettingsStorageKey();
+    const raw = localStorage.getItem(key) ?? localStorage.getItem(legacyKey);
+    if (!raw) {
+      const next = {
         apiBase: fallbackApiBase,
         token: "",
         projectId,
       };
-        if (cachedSettings && sameSettings(cachedSettings, next)) return cachedSettings;
-        cachedSettings = next;
-        return next;
-      }
+      if (cachedSettings && sameSettings(cachedSettings, next)) return cachedSettings;
+      cachedSettings = next;
+      return next;
+    }
     const parsed = JSON.parse(raw) as Partial<Settings>;
     const next = {
-      apiBase: parsed.apiBase || fallbackApiBase,
+      apiBase: normalizeApiBase(parsed.apiBase || fallbackApiBase),
       token: parsed.token || "",
       projectId: parsed.projectId || projectId,
     };
@@ -74,8 +93,13 @@ function notifySettingsChanged() {
 
 export function saveSettings(next: Settings) {
   try {
-    localStorage.setItem(key, JSON.stringify(next));
-    cachedSettings = next;
+    const normalized = {
+      ...next,
+      apiBase: normalizeApiBase(next.apiBase),
+    };
+    const key = getSettingsStorageKey();
+    localStorage.setItem(key, JSON.stringify(normalized));
+    cachedSettings = normalized;
   } finally {
     notifySettingsChanged();
   }
@@ -88,10 +112,11 @@ export function clearAuth() {
 
 export function subscribeSettingsChange(listener: () => void): () => void {
   if (typeof window === "undefined") return () => {};
+  const key = getSettingsStorageKey();
 
   const onEvent: EventListener = () => listener();
   const onStorage = (e: StorageEvent) => {
-    if (e.key === key) listener();
+    if (e.key === key || e.key === legacyKey) listener();
   };
 
   window.addEventListener(settingsChangedEvent, onEvent);

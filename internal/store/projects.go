@@ -65,3 +65,56 @@ func GetProjectByID(ctx context.Context, db *gorm.DB, id int) (ProjectRow, bool,
 	}
 	return ProjectRow{ID: p.ID, OwnerUserID: p.OwnerUserID, Name: p.Name}, true, nil
 }
+
+func DeleteProject(ctx context.Context, db *gorm.DB, projectID int) (bool, error) {
+	if db == nil || projectID <= 0 {
+		return false, nil
+	}
+
+	var deleted bool
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("project_id = ?", projectID).Delete(&model.ProjectKey{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("project_id = ?", projectID).Delete(&model.Event{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("project_id = ?", projectID).Delete(&model.Log{}).Error; err != nil {
+			return err
+		}
+
+		// Best-effort cleanup for optional per-project tables.
+		for _, table := range []string{
+			"alert_contacts",
+			"alert_contact_groups",
+			"alert_contact_group_members",
+			"alert_wecom_bots",
+			"alert_webhook_endpoints",
+			"alert_rules",
+			"alert_states",
+			"alert_deliveries",
+		} {
+			if err := deleteByProjectIDIfTableExists(tx, table, projectID); err != nil {
+				return err
+			}
+		}
+
+		res := tx.Where("id = ?", projectID).Delete(&model.Project{})
+		if res.Error != nil {
+			return res.Error
+		}
+		deleted = res.RowsAffected > 0
+		return nil
+	})
+	return deleted, err
+}
+
+func deleteByProjectIDIfTableExists(tx *gorm.DB, table string, projectID int) error {
+	if tx == nil {
+		return nil
+	}
+	if !tx.Migrator().HasTable(table) {
+		return nil
+	}
+	return tx.Exec("DELETE FROM "+table+" WHERE project_id = ?", projectID).Error
+}

@@ -8,6 +8,7 @@ import "package:flutter/foundation.dart";
 import "device_id_store.dart";
 import "gzip.dart";
 import "payload.dart";
+import "queue_store.dart";
 import "transport.dart";
 
 class LogtapClient {
@@ -25,6 +26,7 @@ class LogtapClient {
 
   final bool _gzip;
   final bool _persistDeviceId;
+  final bool _persistQueue;
 
   final LogtapBeforeSend? _beforeSend;
 
@@ -32,6 +34,7 @@ class LogtapClient {
   final bool _ownsTransport;
 
   LogtapDeviceIdStore? _deviceIdStore;
+  LogtapQueueStore? _queueStore;
 
   String _deviceId;
   JsonMap? _user;
@@ -63,10 +66,12 @@ class LogtapClient {
     required Duration timeout,
     required bool gzip,
     required bool persistDeviceId,
+    required bool persistQueue,
     required LogtapBeforeSend? beforeSend,
     required LogtapTransport transport,
     required bool ownsTransport,
     required LogtapDeviceIdStore? deviceIdStore,
+    required LogtapQueueStore? queueStore,
     required JsonMap? user,
     required JsonMap? globalFields,
     required JsonMap? globalProperties,
@@ -82,10 +87,12 @@ class LogtapClient {
         _timeout = timeout,
         _gzip = gzip,
         _persistDeviceId = persistDeviceId,
+        _persistQueue = persistQueue,
         _beforeSend = beforeSend,
         _transport = transport,
         _ownsTransport = ownsTransport,
         _deviceIdStore = deviceIdStore,
+        _queueStore = queueStore,
         _user = user,
         _globalFields = globalFields,
         _globalProperties = globalProperties,
@@ -134,7 +141,17 @@ class LogtapClient {
     final gzipSupported = gzipEncode(Uint8List(0)) != null;
     final gzipEnabled = options.gzip && gzipSupported;
 
-    return LogtapClient._(
+    final persistQueue = options.persistQueue;
+    LogtapQueueStore? queueStore = options.queueStore;
+    if (persistQueue && queueStore == null) {
+      queueStore = defaultQueueStore(projectId);
+    }
+
+    final persisted = persistQueue ? await queueStore?.load() : null;
+    final persistedLogs = _coerceQueueList(persisted?["logs"]);
+    final persistedTrack = _coerceQueueList(persisted?["track"]);
+
+    final client = LogtapClient._(
       baseUrl: baseUrl,
       projectId: projectId,
       deviceId: deviceId,
@@ -145,16 +162,33 @@ class LogtapClient {
       timeout: options.timeout,
       gzip: gzipEnabled,
       persistDeviceId: options.persistDeviceId,
+      persistQueue: persistQueue,
       beforeSend: options.beforeSend,
       transport: t,
       ownsTransport: ownsTransport,
       deviceIdStore: store,
+      queueStore: queueStore,
       user: options.user?.toJson(),
       globalFields: _jsonSafeMap(options.globalFields),
       globalProperties: _jsonSafeMap(options.globalProperties),
       globalTags: options.globalTags == null ? null : Map<String, String>.from(options.globalTags!),
       globalContexts: _jsonSafeMap(options.globalContexts),
     );
+
+    if (persistedLogs.isNotEmpty) {
+      client._logQueue.addAll(persistedLogs);
+      client._trimQueue(client._logQueue);
+    }
+    if (persistedTrack.isNotEmpty) {
+      client._trackQueue.addAll(persistedTrack);
+      client._trimQueue(client._trackQueue);
+    }
+    if (persistedLogs.isNotEmpty || persistedTrack.isNotEmpty) {
+      await client._persistQueueNow();
+      unawaited(Future.microtask(client.flush));
+    }
+
+    return client;
   }
 
   void setUser(LogtapUser? user) {
@@ -267,6 +301,7 @@ class LogtapClient {
     _timer?.cancel();
     _timer = null;
     await flush();
+    await _persistQueueNow();
     if (_ownsTransport) {
       _transport.close();
     }
@@ -340,15 +375,15 @@ class LogtapClient {
 
     final batchSize = min(_maxBatchSize, queue.length);
     final batch = queue.sublist(0, batchSize);
-    queue.removeRange(0, batchSize);
 
     final ok = await _postJson(path, batch);
     if (!ok) {
-      queue.insertAll(0, batch);
       _trimQueue(queue);
       _bumpBackoff();
       return false;
     }
+    queue.removeRange(0, batchSize);
+    await _persistQueueNow();
     return true;
   }
 
@@ -390,6 +425,23 @@ class LogtapClient {
     if (p == null) return;
     queue.add(p);
     _trimQueue(queue);
+    unawaited(_persistQueueNow());
+  }
+
+  Future<void> _persistQueueNow() async {
+    if (!_persistQueue) return;
+    final store = _queueStore;
+    if (store == null) return;
+
+    if (_logQueue.isEmpty && _trackQueue.isEmpty) {
+      await store.clear();
+      return;
+    }
+    await store.save(<String, dynamic>{
+      "v": 1,
+      "logs": _logQueue,
+      "track": _trackQueue,
+    });
   }
 
   JsonMap? _applyBeforeSend(JsonMap payload) {
@@ -430,6 +482,17 @@ class LogtapClient {
   }
 
   static String _newDeviceId() => "d_${_randomHex(16)}";
+
+  static List<JsonMap> _coerceQueueList(Object? v) {
+    if (v is! List) return const [];
+    final out = <JsonMap>[];
+    for (final item in v) {
+      if (item is Map) {
+        out.add(Map<String, dynamic>.from(item));
+      }
+    }
+    return out;
+  }
 
   static String _randomHex(int bytes) {
     final rnd = _secureRandom();

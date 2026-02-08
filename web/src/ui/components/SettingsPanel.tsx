@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { createProjectKey, listProjectKeys, revokeProjectKey, type ProjectKey } from "../../lib/api";
-import { clearAuth, loadSettings, saveSettings } from "../../lib/storage";
+import { clearAuth, loadSettings, normalizeApiBase, saveSettings } from "../../lib/storage";
 
-export function SettingsPanel() {
+export function SettingsPanel(props?: { allowApiBaseEdit?: boolean }) {
+  const allowApiBaseEdit = props?.allowApiBaseEdit ?? true;
   const [searchParams, setSearchParams] = useSearchParams();
   const openFromQuery = searchParams.get("settings") === "project";
   const searchKey = searchParams.toString();
@@ -13,6 +14,7 @@ export function SettingsPanel() {
   const [keys, setKeys] = useState<ProjectKey[]>([]);
   const [newKeyName, setNewKeyName] = useState("default");
   const [projectBusy, setProjectBusy] = useState(false);
+  const [copiedKeyId, setCopiedKeyId] = useState<number | null>(null);
   const [projectErr, setProjectErr] = useState("");
 
   useEffect(() => {
@@ -36,10 +38,8 @@ export function SettingsPanel() {
     (async () => {
       try {
         setProjectErr("");
-        const projectId = Number(settings.projectId);
-        if (!Number.isFinite(projectId) || projectId <= 0) {
-          throw new Error("项目 ID 无效");
-        }
+        const projectId = settings.projectId.trim();
+        if (!projectId) throw new Error("项目 ID 无效");
         const res = await listProjectKeys(settings, projectId);
         if (!cancelled) setKeys(res.items);
       } catch (e) {
@@ -74,6 +74,31 @@ export function SettingsPanel() {
     : "";
   const firstKey = keys.find((k) => !k.revoked_at)?.key ?? "";
 
+  const copyText = async (text: string): Promise<boolean> => {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+    }
+    try {
+      const el = document.createElement("textarea");
+      el.value = text;
+      el.setAttribute("readonly", "true");
+      el.style.position = "fixed";
+      el.style.top = "-9999px";
+      el.style.left = "-9999px";
+      document.body.appendChild(el);
+      el.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(el);
+      return ok;
+    } catch {
+      return false;
+    }
+  };
+
   return (
     <div className="relative">
       <button
@@ -85,21 +110,27 @@ export function SettingsPanel() {
       {open ? (
         <div className="absolute right-0 mt-2 w-[26rem] max-h-[80vh] overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950 p-4 shadow-xl">
           <div className="mb-3 text-sm font-semibold">连接设置</div>
-          <label className="block text-xs text-zinc-400">API Base</label>
-          <input
-            value={apiBase}
-            onChange={(e) => {
-              const raw = e.target.value;
-              setApiBase(raw);
-              const base = raw.trim().replace(/\/+$/, "");
-              if (settings.apiBase === base) return;
-              const next = { ...settings, apiBase: base };
-              setSettings(next);
-              saveSettings(next);
-            }}
-            placeholder="http://localhost:8080"
-            className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-          />
+          <label className="block text-xs text-zinc-400">API Base（不要包含 /api）</label>
+          {allowApiBaseEdit ? (
+            <input
+              value={apiBase}
+              onChange={(e) => {
+                const raw = e.target.value;
+                setApiBase(raw);
+                const base = normalizeApiBase(raw);
+                if (settings.apiBase === base) return;
+                const next = { ...settings, apiBase: base };
+                setSettings(next);
+                saveSettings(next);
+              }}
+              placeholder="http://localhost:8080"
+              className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+            />
+          ) : (
+            <div className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-200">
+              {settings.apiBase}
+            </div>
+          )}
           {settings.token ? (
             <div className="mt-4 border-t border-zinc-900 pt-4">
               <div className="text-sm font-semibold">项目详情</div>
@@ -132,10 +163,8 @@ export function SettingsPanel() {
                         onClick={async () => {
                           try {
                             if (!settings.projectId) return;
-                            const projectId = Number(settings.projectId);
-                            if (!Number.isFinite(projectId) || projectId <= 0) {
-                              throw new Error("项目 ID 无效");
-                            }
+                            const projectId = settings.projectId.trim();
+                            if (!projectId) throw new Error("项目 ID 无效");
                             setProjectErr("");
                             setProjectBusy(true);
                             const k = await createProjectKey(settings, projectId, newKeyName.trim());
@@ -192,34 +221,48 @@ export function SettingsPanel() {
                                 {k.revoked_at ? "revoked" : "active"}
                               </td>
                               <td className="py-2 pr-0 text-right">
-                                {!k.revoked_at ? (
+                                <div className="flex justify-end gap-2">
                                   <button
                                     className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-900 disabled:opacity-60"
                                     disabled={projectBusy}
                                     onClick={async () => {
-                                      try {
-                                        if (!settings.projectId) return;
-                                        const projectId = Number(settings.projectId);
-                                        if (!Number.isFinite(projectId) || projectId <= 0) {
-                                          throw new Error("项目 ID 无效");
-                                        }
-                                        setProjectErr("");
-                                        setProjectBusy(true);
-                                        await revokeProjectKey(settings, projectId, k.id);
-                                        const res = await listProjectKeys(settings, projectId);
-                                        setKeys(res.items);
-                                      } catch (e) {
-                                        setProjectErr(
-                                          e instanceof Error ? e.message : String(e),
-                                        );
-                                      } finally {
-                                        setProjectBusy(false);
-                                      }
+                                      const ok = await copyText(k.key);
+                                      if (!ok) return;
+                                      setCopiedKeyId(k.id);
+                                      window.setTimeout(() => {
+                                        setCopiedKeyId((prev) => (prev === k.id ? null : prev));
+                                      }, 1200);
                                     }}
                                   >
-                                    吊销
+                                    {copiedKeyId === k.id ? "已复制" : "复制"}
                                   </button>
-                                ) : null}
+                                  {!k.revoked_at ? (
+                                    <button
+                                      className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-900 disabled:opacity-60"
+                                      disabled={projectBusy}
+                                      onClick={async () => {
+                                        try {
+                                          if (!settings.projectId) return;
+                                          const projectId = settings.projectId.trim();
+                                          if (!projectId) throw new Error("项目 ID 无效");
+                                          setProjectErr("");
+                                          setProjectBusy(true);
+                                          await revokeProjectKey(settings, projectId, k.id);
+                                          const res = await listProjectKeys(settings, projectId);
+                                          setKeys(res.items);
+                                        } catch (e) {
+                                          setProjectErr(
+                                            e instanceof Error ? e.message : String(e),
+                                          );
+                                        } finally {
+                                          setProjectBusy(false);
+                                        }
+                                      }}
+                                    >
+                                      吊销
+                                    </button>
+                                  ) : null}
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -244,7 +287,7 @@ export function SettingsPanel() {
                       />
                       <CodeBlock
                         title="Sentry DSN（可用于 SDK）"
-                        text={`DSN: ${formatDSN(settings.apiBase, Number(settings.projectId), firstKey || "pk_xxx")}\nPOST: ${ingestURL}/envelope/`}
+                        text={`DSN: ${formatDSN(settings.apiBase, settings.projectId, firstKey || "pk_xxx")}\nPOST: ${ingestURL}/envelope/`}
                       />
                     </div>
                   </div>
@@ -332,7 +375,7 @@ function CodeBlock(props: { title: string; text: string }) {
   );
 }
 
-function formatDSN(apiBase: string, projectId: number, key: string) {
+function formatDSN(apiBase: string, projectId: string, key: string) {
   try {
     const u = new URL(apiBase);
     return `${u.protocol}//${encodeURIComponent(key)}@${u.host}/${projectId}`;

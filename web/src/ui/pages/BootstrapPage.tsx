@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { bootstrap, getSystemStatus } from "../../lib/api";
-import { loadSettings, saveSettings } from "../../lib/storage";
+import { loadSettings, normalizeApiBase, saveSettings } from "../../lib/storage";
 import { Panel } from "../components/Panel";
 import { useNavigate } from "react-router-dom";
 
@@ -24,7 +24,7 @@ export function BootstrapPage() {
         setStatusErr("");
         setActionErr("");
         setStatusChecked(false);
-        const base = apiBase.trim().replace(/\/+$/, "");
+        const base = normalizeApiBase(apiBase);
         const s = await getSystemStatus(base);
         if (cancelled) return;
         setStatus(s.status);
@@ -58,13 +58,13 @@ export function BootstrapPage() {
       ) : null}
 
       <Panel title="连接">
-        <label className="block text-xs text-zinc-400">API Base</label>
+        <label className="block text-xs text-zinc-400">API Base（不要包含 /api）</label>
         <input
           value={apiBase}
           onChange={(e) => {
             const raw = e.target.value;
             setApiBase(raw);
-            const base = raw.trim().replace(/\/+$/, "");
+            const base = normalizeApiBase(raw);
             const s = loadSettings();
             if (s.apiBase !== base) saveSettings({ ...s, apiBase: base });
           }}
@@ -110,7 +110,7 @@ export function BootstrapPage() {
               try {
                 setBusy(true);
                 setActionErr("");
-                const base = apiBase.trim().replace(/\/+$/, "");
+                const base = normalizeApiBase(apiBase);
                 await bootstrap(base, email.trim(), password, projectName.trim() || "Default");
                 saveSettings({ apiBase: base, token: "", projectId: "" });
                 nav(`/login?email=${encodeURIComponent(email.trim())}`, { replace: true });

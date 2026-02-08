@@ -20,6 +20,14 @@ cd deploy
 docker compose up --build
 ```
 
+可选：启用 GeoIP（国家/城市/运营商分布）
+
+- 需要 MaxMind GeoLite2 下载密钥：设置环境变量 `MAXMIND_LICENSE_KEY`（见 `.env.example`）
+- Compose 会把 mmdb 下载/缓存到 volume：`/data/geoip/`
+- 如果 mmdb 存在但你未显式配置 `GEOIP_CITY_MMDB/GEOIP_ASN_MMDB`，容器启动脚本会自动使用：
+  - `GEOIP_CITY_MMDB=/data/geoip/GeoLite2-City.mmdb`
+  - `GEOIP_ASN_MMDB=/data/geoip/GeoLite2-ASN.mmdb`
+
 启动后：
 
 - 网关：`http://localhost:8080`

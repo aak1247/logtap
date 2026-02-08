@@ -17,6 +17,7 @@
 - 可靠性：
   - 发送失败自动指数退避（上限 30s）
   - 失败后会自动重试（即使没有新日志入队）
+  - 可选：本地持久化队列（应用重启后继续发送未发送成功的数据）
   - `flush()`/`close()`：显式触发发送；`close()` 会停止定时器并尽力发送剩余数据
 - 压缩：
   - 可选 `gzip`（不支持的平台自动降级为非 gzip）
@@ -44,6 +45,7 @@
 - `timeoutMs` / `timeout`
 - `gzip`
 - `deviceId` / `persistDeviceId`
+- `persistQueue` / `queueFilePath` / `queueStorageKey`（可选：本地持久化队列）
 - `user`
 - `globalTags`
 - `globalFields`（日志字段）

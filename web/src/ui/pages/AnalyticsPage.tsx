@@ -1,17 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   getActiveSeries,
+  getCleanupPolicy,
   getDistribution,
   getFunnel,
   getRetention,
   getTopEvents,
   type ActiveSeriesResponse,
+  type CleanupPolicy,
   type DistributionResponse,
   type FunnelResponse,
   type RetentionResponse,
   type TopEventsResponse,
 } from "../../lib/api";
 import { loadSettings } from "../../lib/storage";
+import { clampFunnelDays, loadFunnelDays, saveFunnelDays } from "../../lib/prefs";
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
 import { useNavigate } from "react-router-dom";
@@ -30,8 +33,10 @@ export function AnalyticsPage() {
   );
   const [retention, setRetention] = useState<RetentionResponse | null>(null);
   const [topEvents, setTopEvents] = useState<TopEventsResponse | null>(null);
+  const [cleanupPolicy, setCleanupPolicy] = useState<CleanupPolicy | null>(null);
   const [funnelStepsText, setFunnelStepsText] = useState("signup,checkout,paid");
   const [funnelWithin, setFunnelWithin] = useState("24h");
+  const [funnelDays, setFunnelDays] = useState(() => loadFunnelDays());
   const [funnel, setFunnel] = useState<FunnelResponse | null>(null);
   const [funnelBusy, setFunnelBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -50,7 +55,7 @@ export function AnalyticsPage() {
       try {
         if (!settings.token || !settings.projectId) return;
         setErr("");
-        const [d, m, os, country, op, ret, top] = await Promise.all([
+        const [d, m, os, country, op, ret, top, cp] = await Promise.all([
           getActiveSeries(settings, { bucket: "day" }),
           getActiveSeries(settings, { bucket: "month" }),
           getDistribution(settings, { dim: "os", limit: 10 }),
@@ -58,6 +63,7 @@ export function AnalyticsPage() {
           getDistribution(settings, { dim: "asn_org", limit: 10 }),
           getRetention(settings),
           getTopEvents(settings, { limit: 20 }),
+          getCleanupPolicy(settings).catch(() => null),
         ]);
         if (cancelled) return;
         setDau(d);
@@ -67,6 +73,7 @@ export function AnalyticsPage() {
         setOperatorDist(op);
         setRetention(ret);
         setTopEvents(top);
+        setCleanupPolicy(cp);
       } catch (e) {
         if (cancelled) return;
         setErr(e instanceof Error ? e.message : String(e));
@@ -172,7 +179,7 @@ export function AnalyticsPage() {
 
             <div className="rounded-lg border border-zinc-900 p-3">
               <div className="text-sm font-semibold">漏斗</div>
-              <div className="mt-1 grid grid-cols-1 gap-2 md:grid-cols-3">
+              <div className="mt-1 grid grid-cols-1 gap-2 md:grid-cols-4">
                 <div>
                   <div className="text-xs text-zinc-400">steps（逗号分隔）</div>
                   <input
@@ -191,19 +198,47 @@ export function AnalyticsPage() {
                     className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
                   />
                 </div>
+                <div>
+                  <div className="text-xs text-zinc-400">时间范围（天，默认 7）</div>
+                  <input
+                    value={String(funnelDays)}
+                    onChange={(e) => {
+                      const next = clampFunnelDays(Number(e.target.value || "7"));
+                      setFunnelDays(next);
+                      saveFunnelDays(next);
+                    }}
+                    placeholder="7"
+                    className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+                  />
+                </div>
                 <div className="flex items-end">
                   <button
                     className="w-full rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60"
                     onClick={async () => {
                       try {
                         setFunnelBusy(true);
+                        setErr("");
                         const steps = funnelStepsText
                           .split(",")
                           .map((s) => s.trim())
                           .filter(Boolean);
                         if (!settings.token || !settings.projectId) return;
+
+                        const rangeDays = clampFunnelDays(funnelDays);
+                        const trackRetention = cleanupPolicy?.track_events_retention_days ?? 0;
+                        if (trackRetention > 0 && rangeDays > trackRetention) {
+                          setErr(
+                            `漏斗时间范围=${rangeDays} 天，但分析事件保留=${trackRetention} 天；会导致漏斗明细不足无法保证精确。请在“概览-自动清理”把“分析事件保留(天)”调到 ≥ ${rangeDays}，或把漏斗时间范围调到 ≤ ${trackRetention}。`,
+                          );
+                          return;
+                        }
+
+                        const end = new Date();
+                        const start = new Date(end.getTime() - (rangeDays - 1) * 24 * 3600 * 1000);
                         const res = await getFunnel(settings, {
                           steps,
+                          start: start.toISOString(),
+                          end: end.toISOString(),
                           within: funnelWithin.trim() || undefined,
                         });
                         setFunnel(res);
@@ -219,6 +254,15 @@ export function AnalyticsPage() {
                   </button>
                 </div>
               </div>
+              {cleanupPolicy?.track_events_retention_days ? (
+                <div className="mt-2 text-xs text-zinc-500">
+                  分析事件保留：{cleanupPolicy.track_events_retention_days} 天（漏斗依赖该明细；过短会无法精确计算）
+                </div>
+              ) : (
+                <div className="mt-2 text-xs text-zinc-500">
+                  分析事件保留：未配置（0=不清理）；漏斗依赖分析事件明细
+                </div>
+              )}
 
               <FunnelTable data={funnel} />
             </div>

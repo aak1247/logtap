@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { loadSettings } from "../../lib/storage";
 import { searchLogs, type LogRow } from "../../lib/api";
 import { Panel } from "../components/Panel";
@@ -7,6 +7,7 @@ import { useNavigate } from "react-router-dom";
 export function LogsPage() {
   const settings = useMemo(() => loadSettings(), []);
   const nav = useNavigate();
+  const autoRan = useRef(false);
   const [q, setQ] = useState("");
   const [traceId, setTraceId] = useState("");
   const [level, setLevel] = useState("");
@@ -24,6 +25,13 @@ export function LogsPage() {
       nav("/login");
     }
   }, [settings.token, settings.projectId, nav]);
+
+  useEffect(() => {
+    if (autoRan.current) return;
+    if (!settings.token || !settings.projectId) return;
+    autoRan.current = true;
+    void run();
+  }, [settings.token, settings.projectId]);
 
   async function run() {
     try {
@@ -90,7 +98,7 @@ export function LogsPage() {
 
       <Panel title={`结果（${rows.length}）`}>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
+          <table className="w-full text-left text-xs">
             <thead className="text-xs text-zinc-500">
               <tr>
                 <th className="py-2 pr-4">时间</th>
@@ -102,20 +110,30 @@ export function LogsPage() {
             <tbody className="divide-y divide-zinc-900">
               {rows.map((r) => (
                 <tr key={r.id} className="align-top hover:bg-zinc-900/40">
-                  <td className="py-2 pr-4 text-zinc-300">
+                  <td className="py-1.5 pr-4 font-mono text-[11px] text-zinc-400">
                     {new Date(r.timestamp).toLocaleString()}
                   </td>
-                  <td className="py-2 pr-4 text-zinc-300">{r.level ?? ""}</td>
-                  <td className="py-2 pr-4 font-mono text-xs text-zinc-500">
+                  <td className="py-1.5 pr-4">
+                    <LevelPill level={r.level} />
+                  </td>
+                  <td className="py-1.5 pr-4 font-mono text-[11px] text-zinc-500">
                     <div>{r.trace_id ?? ""}</div>
                     <div>{r.span_id ?? ""}</div>
                   </td>
-                  <td className="py-2 pr-4 text-zinc-100">
-                    <div>{r.message}</div>
+                  <td className="py-1.5 pr-4 text-zinc-100">
+                    <div className="text-xs leading-5">{r.message}</div>
                     {r.fields ? (
-                      <pre className="mt-2 overflow-auto rounded bg-zinc-900/40 p-2 text-xs text-zinc-300">
-                        {JSON.stringify(r.fields, null, 2)}
-                      </pre>
+                      <details className="group mt-1.5">
+                        <summary className="cursor-pointer select-none text-[11px] text-zinc-400 marker:text-zinc-600 hover:text-zinc-200">
+                          fields <span className="text-zinc-500">({countKeys(r.fields)})</span>{" "}
+                          <span className="group-open:hidden">展开</span>
+                          <span className="hidden group-open:inline">收起</span>
+                          <span className="ml-2 text-zinc-500">{fieldsPreview(r.fields)}</span>
+                        </summary>
+                        <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-zinc-950/40 p-2 font-mono text-[11px] leading-4 text-zinc-200 ring-1 ring-zinc-900">
+                          {JSON.stringify(r.fields, null, 2)}
+                        </pre>
+                      </details>
                     ) : null}
                   </td>
                 </tr>
@@ -132,6 +150,45 @@ export function LogsPage() {
         </div>
       </Panel>
     </div>
+  );
+}
+
+function countKeys(obj: Record<string, unknown>): number {
+  try {
+    return Object.keys(obj).length;
+  } catch {
+    return 0;
+  }
+}
+
+function fieldsPreview(obj: Record<string, unknown>): string {
+  try {
+    const s = JSON.stringify(obj);
+    if (!s) return "";
+    const max = 120;
+    return s.length > max ? `${s.slice(0, max)}…` : s;
+  } catch {
+    return "";
+  }
+}
+
+function LevelPill(props: { level?: string }) {
+  const level = (props.level || "").toLowerCase();
+  const palette =
+    level === "error" || level === "fatal"
+      ? "bg-red-950/50 text-red-200 ring-red-900/60"
+      : level === "warn" || level === "warning"
+        ? "bg-amber-950/40 text-amber-200 ring-amber-900/60"
+        : level === "debug"
+          ? "bg-zinc-950/40 text-zinc-300 ring-zinc-800"
+          : level
+            ? "bg-indigo-950/40 text-indigo-200 ring-indigo-900/60"
+            : "bg-zinc-950/40 text-zinc-400 ring-zinc-800";
+
+  return (
+    <span className={`inline-flex items-center rounded-md px-2 py-0.5 font-mono text-[11px] ring-1 ${palette}`}>
+      {props.level || ""}
+    </span>
   );
 }
 

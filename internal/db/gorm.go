@@ -9,7 +9,14 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-func NewGorm(ctx context.Context, postgresURL string) (*gorm.DB, error) {
+type Options struct {
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	ConnMaxIdleTime time.Duration
+}
+
+func NewGorm(ctx context.Context, postgresURL string, opts Options) (*gorm.DB, error) {
 	gdb, err := gorm.Open(postgres.Open(postgresURL), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -21,10 +28,26 @@ func NewGorm(ctx context.Context, postgresURL string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	sqlDB.SetMaxOpenConns(10)
-	sqlDB.SetMaxIdleConns(1)
-	sqlDB.SetConnMaxLifetime(30 * time.Minute)
-	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
+	if opts.MaxOpenConns <= 0 {
+		opts.MaxOpenConns = 10
+	}
+	if opts.MaxIdleConns < 0 {
+		opts.MaxIdleConns = 1
+	}
+	if opts.MaxIdleConns > opts.MaxOpenConns {
+		opts.MaxIdleConns = opts.MaxOpenConns
+	}
+	if opts.ConnMaxLifetime <= 0 {
+		opts.ConnMaxLifetime = 30 * time.Minute
+	}
+	if opts.ConnMaxIdleTime <= 0 {
+		opts.ConnMaxIdleTime = 5 * time.Minute
+	}
+
+	sqlDB.SetMaxOpenConns(opts.MaxOpenConns)
+	sqlDB.SetMaxIdleConns(opts.MaxIdleConns)
+	sqlDB.SetConnMaxLifetime(opts.ConnMaxLifetime)
+	sqlDB.SetConnMaxIdleTime(opts.ConnMaxIdleTime)
 
 	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
@@ -34,4 +57,3 @@ func NewGorm(ctx context.Context, postgresURL string) (*gorm.DB, error) {
 	}
 	return gdb, nil
 }
-

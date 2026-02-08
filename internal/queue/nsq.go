@@ -31,6 +31,10 @@ func (p *NSQPublisher) Publish(topic string, body []byte) error {
 	return p.producer.Publish(topic, body)
 }
 
+func (p *NSQPublisher) MultiPublish(topic string, bodies [][]byte) error {
+	return p.producer.MultiPublish(topic, bodies)
+}
+
 func (p *NSQPublisher) Stop() {
 	p.producer.Stop()
 }

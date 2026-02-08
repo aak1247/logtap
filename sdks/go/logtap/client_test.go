@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -594,5 +596,84 @@ func TestClient_ImmediateTrack_RetryOnFailure(t *testing.T) {
 			t.Fatalf("timeout waiting for retry (calls=%d)", got)
 		}
 		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func TestClient_PersistQueue_ReplayOnRestart(t *testing.T) {
+	t.Parallel()
+
+	queuePath := filepath.Join(t.TempDir(), "queue.json")
+
+	failSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(failSrv.Close)
+
+	c1, err := NewClient(ClientOptions{
+		BaseURL:         failSrv.URL,
+		ProjectID:       1,
+		FlushInterval:   -1,
+		PersistQueue:    true,
+		QueueFilePath:   queuePath,
+		PersistDebounce: 0,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	c1.Error("boom", map[string]any{"k": "v"}, nil)
+	_ = c1.Flush(context.Background()) // expected to fail
+	_ = c1.Close(context.Background())
+
+	if _, err := os.Stat(queuePath); err != nil {
+		t.Fatalf("expected persisted queue file, stat error: %v", err)
+	}
+
+	ch := make(chan []byte, 1)
+	okSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/1/logs/" {
+			select {
+			case ch <- readBody(t, r):
+			default:
+			}
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(okSrv.Close)
+
+	c2, err := NewClient(ClientOptions{
+		BaseURL:         okSrv.URL,
+		ProjectID:       1,
+		FlushInterval:   -1,
+		PersistQueue:    true,
+		QueueFilePath:   queuePath,
+		PersistDebounce: 0,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = c2.Close(context.Background()) })
+
+	var body []byte
+	select {
+	case body = <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for replay request")
+	}
+
+	var items []map[string]any
+	if err := json.Unmarshal(body, &items); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if len(items) != 1 || items[0]["message"] != "boom" {
+		t.Fatalf("unexpected replay payload: %v", items)
+	}
+
+	_ = c2.Close(context.Background())
+
+	if _, err := os.Stat(queuePath); err == nil {
+		t.Fatalf("expected queue file to be cleared after successful flush")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat queue file: %v", err)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aak1247/logtap/internal/cleanup"
 	"github.com/aak1247/logtap/internal/config"
 	"github.com/aak1247/logtap/internal/consumer"
 	"github.com/aak1247/logtap/internal/db"
@@ -18,6 +19,7 @@ import (
 	"github.com/aak1247/logtap/internal/httpserver"
 	"github.com/aak1247/logtap/internal/metrics"
 	"github.com/aak1247/logtap/internal/migrate"
+	"github.com/aak1247/logtap/internal/obs"
 	"github.com/aak1247/logtap/internal/queue"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -33,16 +35,26 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	publisher, err := queue.NewNSQPublisher(cfg.NSQDAddress)
+	nsqPublisher, err := queue.NewNSQPublisher(cfg.NSQDAddress)
 	if err != nil {
 		log.Fatalf("nsq publisher: %v", err)
 	}
-	defer publisher.Stop()
+	defer nsqPublisher.Stop()
+
+	stats := obs.New()
+	var publisher queue.Publisher = nsqPublisher
+	publisher = queue.ObservePublisher(publisher, stats)
+	if cfg.NSQDHTTPAddress != "" {
+		go obs.StartNSQDepthPoller(ctx, stats, cfg.NSQDHTTPAddress, 5*time.Second)
+	}
 
 	var gdb *gorm.DB
 	if cfg.PostgresURL != "" {
 		readyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		d, err := waitForPostgres(readyCtx, cfg.PostgresURL)
+		d, err := waitForPostgres(readyCtx, cfg.PostgresURL, db.Options{
+			MaxOpenConns: cfg.DBMaxOpenConns,
+			MaxIdleConns: cfg.DBMaxIdleConns,
+		})
 		cancel()
 		if err != nil {
 			log.Fatalf("db: %v", err)
@@ -55,7 +67,7 @@ func main() {
 		defer sqlDB.Close()
 
 		migCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		if err := migrate.AutoMigrate(migCtx, gdb); err != nil {
+		if err := migrate.AutoMigrate(migCtx, gdb, migrate.Options{RequireTimescale: cfg.DBRequireTimescale}); err != nil {
 			cancel()
 			log.Fatalf("db migrate: %v", err)
 		}
@@ -71,7 +83,7 @@ func main() {
 			log.Fatalf("redis: %v", err)
 		}
 		defer rdb.Close()
-		recorder = metrics.NewRedisRecorder(rdb)
+		recorder = metrics.NewRedisRecorder(rdb, metrics.WithTTLs(cfg.MetricsDayTTL, cfg.MetricsDistTTL, cfg.MetricsMonthTTL))
 	}
 
 	geoip, err := enrich.NewGeoIP(cfg.GeoIPCityMMDB, cfg.GeoIPASNMMDB)
@@ -82,7 +94,7 @@ func main() {
 		defer geoip.Close()
 	}
 
-	srv := httpserver.New(cfg, publisher, gdb, recorder)
+	srv := httpserver.New(cfg, publisher, gdb, recorder, stats)
 
 	var eventConsumer *consumer.NSQConsumer
 	var logConsumer *consumer.NSQConsumer
@@ -90,14 +102,26 @@ func main() {
 		if gdb == nil {
 			log.Fatalf("POSTGRES_URL required when RUN_CONSUMERS=true")
 		}
-		eventConsumer, err = consumer.NewNSQEventConsumer(ctx, cfg, gdb, recorder, geoip)
+		eventConsumer, err = consumer.NewNSQEventConsumer(ctx, cfg, gdb, recorder, geoip, stats)
 		if err != nil {
 			log.Fatalf("event consumer: %v", err)
 		}
-		logConsumer, err = consumer.NewNSQLogConsumer(ctx, cfg, gdb, recorder)
+		logConsumer, err = consumer.NewNSQLogConsumer(ctx, cfg, gdb, recorder, stats)
 		if err != nil {
 			log.Fatalf("log consumer: %v", err)
 		}
+	}
+
+	if gdb != nil {
+		w := cleanup.NewWorker(gdb)
+		w.Interval = cfg.CleanupInterval
+		w.Limit = cfg.CleanupPolicyLimit
+		w.DeleteBatchSize = cfg.CleanupDeleteBatchSize
+		w.MaxBatches = cfg.CleanupMaxBatches
+		w.BatchSleep = cfg.CleanupBatchSleep
+		w.Stats = stats
+		go w.Run(ctx)
+		log.Printf("cleanup worker enabled")
 	}
 
 	errCh := make(chan error, 1)
@@ -129,12 +153,12 @@ func main() {
 	}
 }
 
-func waitForPostgres(ctx context.Context, postgresURL string) (*gorm.DB, error) {
+func waitForPostgres(ctx context.Context, postgresURL string, opts db.Options) (*gorm.DB, error) {
 	const maxDelay = 5 * time.Second
 	delay := 300 * time.Millisecond
 	var lastErr error
 	for {
-		d, err := db.NewGorm(ctx, postgresURL)
+		d, err := db.NewGorm(ctx, postgresURL, opts)
 		if err == nil {
 			return d, nil
 		}

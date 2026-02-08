@@ -49,6 +49,10 @@ const SDK_VERSION = "0.1.0";
  * @property {string} baseUrl e.g. "http://localhost:8080"
  * @property {number|string} projectId
  * @property {string=} projectKey sent as X-Project-Key: pk_...
+ * @property {boolean=} persistQueue default false (browser: localStorage; node: file)
+ * @property {string=} queueStorageKey browser-only localStorage key (default: "logtap_queue:<baseUrl>:<projectId>")
+ * @property {string=} queueFilePath node-only file path (default: ~/.logtap_queue_<projectId>.json or %APPDATA%\\logtap_queue_<projectId>.json)
+ * @property {number=} persistDebounceMs default 0 (0 = persist immediately; >0 = debounce writes)
  * @property {number=} flushIntervalMs default 2000
  * @property {number=} minBatchSize default 1 (auto-flush when queued >= minBatchSize; set >1 to reduce request count)
  * @property {string[]=} immediateEvents send these event names immediately (track only; bypass batching)
@@ -106,6 +110,19 @@ function randomHex(bytes) {
 
 function newDeviceId() {
   return `d_${randomHex(16)}`;
+}
+
+function defaultQueueStorageKey(baseUrl, projectId) {
+  return `logtap_queue:${String(baseUrl || "").trim()}:${String(projectId || "").trim()}`;
+}
+
+function defaultQueueFilePathNode(projectId) {
+  const p = globalThis.process;
+  if (!p?.env) return null;
+  const isWin = p.platform === "win32";
+  const sep = isWin ? "\\" : "/";
+  const base = isWin ? p.env.APPDATA || p.env.USERPROFILE || p.cwd() : p.env.HOME || p.cwd();
+  return `${base}${sep}.logtap_queue_${String(projectId)}.json`;
 }
 
 function mergeObj(a, b) {
@@ -180,6 +197,13 @@ export class LogtapClient {
     this._user = options.user ? safeJson(options.user) : undefined;
     this._deviceId = options.deviceId ? String(options.deviceId) : this._loadOrCreateDeviceId();
 
+    this._persistQueue = Boolean(options.persistQueue ?? false);
+    this._persistDebounceMs = Number(options.persistDebounceMs ?? 0);
+    this._queueStorageKey = options.queueStorageKey
+      ? String(options.queueStorageKey)
+      : defaultQueueStorageKey(this._baseUrl, this._projectId);
+    this._queueFilePath = options.queueFilePath ? String(options.queueFilePath) : defaultQueueFilePathNode(this._projectId);
+
     /** @type {LogtapLog[]} */
     this._logQueue = [];
     /** @type {LogtapTrackEvent[]} */
@@ -193,6 +217,10 @@ export class LogtapClient {
     this._backoffMs = 0;
     this._flushing = null;
     this._timer = null;
+
+    this._persistTimer = null;
+    this._persisting = null;
+    this._ready = this._persistQueue ? this._loadPersistedQueue().catch(() => {}) : Promise.resolve();
 
     if (this._flushIntervalMs > 0) {
       const tickMs = Math.max(50, Math.min(this._flushIntervalMs, 500));
@@ -297,7 +325,7 @@ export class LogtapClient {
    * Track an event (sent to POST /api/:projectId/track/).
    * @param {string} name
    * @param {Record<string, any>=} properties
-   * @param {{traceId?: string, spanId?: string, timestamp?: string|Date, tags?: Record<string,string>, deviceId?: string, user?: LogtapUser, contexts?: Record<string, any>, extra?: Record<string, any>}=} options
+   * @param {{traceId?: string, spanId?: string, timestamp?: string|Date, tags?: Record<string,string>, deviceId?: string, user?: LogtapUser, contexts?: Record<string, any>, extra?: Record<string, any>, immediate?: boolean}=} options
    */
   track(name, properties, options) {
     const n = String(name || "").trim();
@@ -320,7 +348,8 @@ export class LogtapClient {
 
     const immediate = Boolean(options?.immediate) || this._isImmediateEvent(n);
     if (immediate) {
-      this._sendImmediateTrack(payload);
+      this._enqueueTrack(payload);
+      void this.flush();
       return;
     }
     this._enqueueTrack(payload);
@@ -334,32 +363,16 @@ export class LogtapClient {
     return this._immediateEvents?.has(name) ?? false;
   }
 
-  _sendImmediateTrack(payload) {
-    const p = (async () => {
-      try {
-        const ok = await this._postJSON("/track/", [payload]);
-        if (!ok) {
-          this._enqueueTrack(payload);
-          this._backoffMs = this._backoffMs > 0 ? Math.min(this._backoffMs * 2, 30000) : 500;
-          this._scheduleRetry();
-        }
-      } catch {
-        this._enqueueTrack(payload);
-        this._backoffMs = this._backoffMs > 0 ? Math.min(this._backoffMs * 2, 30000) : 500;
-        this._scheduleRetry();
-      }
-    })();
-    this._pending.add(p);
-    p.finally(() => this._pending.delete(p));
-  }
-
   /**
    * Flush queued logs + events now.
    * @returns {Promise<void>}
    */
   async flush() {
     if (this._flushing) return this._flushing;
-    this._flushing = this._flushInner().finally(() => {
+    this._flushing = (async () => {
+      await this._ready;
+      await this._flushInner();
+    })().finally(() => {
       this._flushing = null;
     });
     return this._flushing;
@@ -380,8 +393,12 @@ export class LogtapClient {
     this._timer = null;
     if (this._retryTimer) clearTimeout(this._retryTimer);
     this._retryTimer = null;
+    if (this._persistTimer) clearTimeout(this._persistTimer);
+    this._persistTimer = null;
+    await this._ready;
     await this._awaitPending();
     await this.flush();
+    await this._persistNow();
   }
 
   /**
@@ -471,6 +488,7 @@ export class LogtapClient {
     if (this._logQueue.length > this._maxQueueSize) {
       this._logQueue.splice(0, this._logQueue.length - this._maxQueueSize);
     }
+    this._schedulePersist();
     this._maybeScheduleAutoFlush();
   }
 
@@ -485,6 +503,7 @@ export class LogtapClient {
     if (this._trackQueue.length > this._maxQueueSize) {
       this._trackQueue.splice(0, this._trackQueue.length - this._maxQueueSize);
     }
+    this._schedulePersist();
     this._maybeScheduleAutoFlush();
   }
 
@@ -544,8 +563,8 @@ export class LogtapClient {
     let sentAny = false;
     let failed = false;
 
-    while (this._logQueue.length > 0) {
-      const ok = await this._flushQueue("/logs/", this._logQueue);
+    while (this._trackQueue.length > 0) {
+      const ok = await this._flushQueue("/track/", this._trackQueue);
       if (!ok) {
         failed = true;
         break;
@@ -553,8 +572,8 @@ export class LogtapClient {
       sentAny = true;
     }
 
-    while (this._trackQueue.length > 0) {
-      const ok = await this._flushQueue("/track/", this._trackQueue);
+    while (this._logQueue.length > 0) {
+      const ok = await this._flushQueue("/logs/", this._logQueue);
       if (!ok) {
         failed = true;
         break;
@@ -578,17 +597,154 @@ export class LogtapClient {
   async _flushQueue(path, queue) {
     if (queue.length === 0) return false;
 
-    const batch = queue.splice(0, this._maxBatchSize);
+    const batch = queue.slice(0, this._maxBatchSize);
     if (batch.length === 0) return false;
 
     const ok = await this._postJSON(path, batch);
     if (!ok) {
-      queue.unshift(...batch);
       this._backoffMs = this._backoffMs > 0 ? Math.min(this._backoffMs * 2, 30000) : 500;
       this._scheduleRetry();
       return false;
     }
+    queue.splice(0, batch.length);
+    this._schedulePersist();
     return true;
+  }
+
+  async _loadPersistedQueue() {
+    const state = await this._readPersistedState();
+    if (!state) return;
+
+    const logs = Array.isArray(state.logs) ? state.logs : [];
+    const track = Array.isArray(state.track) ? state.track : [];
+    const firstQueuedAtMs = Number(state.firstQueuedAtMs ?? 0);
+
+    if (logs.length === 0 && track.length === 0) return;
+
+    if (logs.length > 0) this._logQueue.unshift(...logs);
+    if (track.length > 0) this._trackQueue.unshift(...track);
+
+    if (this._logQueue.length > this._maxQueueSize) {
+      this._logQueue.splice(0, this._logQueue.length - this._maxQueueSize);
+    }
+    if (this._trackQueue.length > this._maxQueueSize) {
+      this._trackQueue.splice(0, this._trackQueue.length - this._maxQueueSize);
+    }
+
+    if (firstQueuedAtMs > 0) {
+      if (this._firstQueuedAtMs === 0 || firstQueuedAtMs < this._firstQueuedAtMs) {
+        this._firstQueuedAtMs = firstQueuedAtMs;
+      }
+    } else if (this._firstQueuedAtMs === 0) {
+      this._firstQueuedAtMs = Date.now();
+    }
+
+    this._scheduleRetry();
+    await this._persistNow();
+  }
+
+  async _readPersistedState() {
+    if (!this._persistQueue) return null;
+
+    if (isBrowser()) {
+      try {
+        const raw = localStorage.getItem(this._queueStorageKey);
+        if (!raw) return null;
+        const v = JSON.parse(raw);
+        if (!v || typeof v !== "object") return null;
+        return v;
+      } catch {
+        return null;
+      }
+    }
+
+    if (!this._queueFilePath) return null;
+    try {
+      const fs = await import("node:fs/promises");
+      const raw = await fs.readFile(this._queueFilePath, "utf8");
+      const v = JSON.parse(raw);
+      if (!v || typeof v !== "object") return null;
+      return v;
+    } catch {
+      return null;
+    }
+  }
+
+  _schedulePersist() {
+    if (!this._persistQueue) return;
+    void this._ready.then(() => {
+      if (this._persistDebounceMs > 0) {
+        if (this._persistTimer) clearTimeout(this._persistTimer);
+        this._persistTimer = setTimeout(() => {
+          this._persistTimer = null;
+          void this._persistNow();
+        }, this._persistDebounceMs);
+        if (!isBrowser() && typeof this._persistTimer?.unref === "function") {
+          this._persistTimer.unref();
+        }
+        return;
+      }
+      void this._persistNow();
+    });
+  }
+
+  async _persistNow() {
+    if (!this._persistQueue) return;
+    if (this._persisting) return this._persisting;
+
+    const p = (async () => {
+      const logs = this._logQueue.slice();
+      const track = this._trackQueue.slice();
+      const firstQueuedAtMs = this._firstQueuedAtMs || 0;
+      const state = { v: 1, firstQueuedAtMs, logs, track };
+
+      if (logs.length === 0 && track.length === 0) {
+        await this._clearPersistedState();
+        return;
+      }
+
+      if (isBrowser()) {
+        try {
+          localStorage.setItem(this._queueStorageKey, JSON.stringify(state));
+        } catch {}
+        return;
+      }
+
+      if (!this._queueFilePath) return;
+      try {
+        const fs = await import("node:fs/promises");
+        const path = await import("node:path");
+        await fs.mkdir(path.dirname(this._queueFilePath), { recursive: true }).catch(() => {});
+        const tmp = `${this._queueFilePath}.${Date.now()}.tmp`;
+        await fs.writeFile(tmp, JSON.stringify(state), "utf8");
+        try {
+          await fs.rename(tmp, this._queueFilePath);
+        } catch {
+          await fs.rm(this._queueFilePath, { force: true }).catch(() => {});
+          await fs.rename(tmp, this._queueFilePath);
+        }
+      } catch {}
+    })().finally(() => {
+      this._persisting = null;
+    });
+
+    this._persisting = p;
+    return p;
+  }
+
+  async _clearPersistedState() {
+    if (!this._persistQueue) return;
+    if (isBrowser()) {
+      try {
+        localStorage.removeItem(this._queueStorageKey);
+      } catch {}
+      return;
+    }
+    if (!this._queueFilePath) return;
+    try {
+      const fs = await import("node:fs/promises");
+      await fs.rm(this._queueFilePath, { force: true }).catch(() => {});
+    } catch {}
   }
 
   async _postJSON(path, payload) {

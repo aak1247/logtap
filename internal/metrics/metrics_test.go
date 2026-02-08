@@ -46,12 +46,15 @@ func TestRedisRecorder_Today_Active_Distribution_Retention(t *testing.T) {
 	rec.ObserveEventDist(ctx, 1, day2, map[string]string{"os": "iOS", "browser": "Chrome"})
 	rec.ObserveLog(ctx, 1, "info", "u2", "d2", day2)
 
-	events, errorsCount, users, ok, err := rec.Today(ctx, 1, now)
+	logs, events, errorsCount, users, ok, err := rec.Today(ctx, 1, now)
 	if err != nil || !ok {
-		t.Fatalf("Today: events=%d errors=%d users=%d ok=%v err=%v", events, errorsCount, users, ok, err)
+		t.Fatalf("Today: logs=%d events=%d errors=%d users=%d ok=%v err=%v", logs, events, errorsCount, users, ok, err)
 	}
 	if events != 1 || errorsCount != 1 {
 		t.Fatalf("expected events=1 errors=1, got %d/%d", events, errorsCount)
+	}
+	if logs != 1 {
+		t.Fatalf("expected logs=1, got %d", logs)
 	}
 	if users < 1 {
 		t.Fatalf("expected users>=1, got %d", users)
@@ -91,4 +94,3 @@ func TestRedisRecorder_Today_Active_Distribution_Retention(t *testing.T) {
 		t.Fatalf("unexpected retention point: %+v", rows[0].Points[0])
 	}
 }
-

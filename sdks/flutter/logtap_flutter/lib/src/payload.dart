@@ -84,6 +84,12 @@ abstract class LogtapDeviceIdStore {
   Future<void> save(String deviceId);
 }
 
+abstract class LogtapQueueStore {
+  Future<JsonMap?> load();
+  Future<void> save(JsonMap state);
+  Future<void> clear();
+}
+
 class LogtapClientOptions {
   final String baseUrl;
   final Object projectId;
@@ -98,6 +104,9 @@ class LogtapClientOptions {
   final bool persistDeviceId;
   final String? deviceId;
   final LogtapDeviceIdStore? deviceIdStore;
+
+  final bool persistQueue;
+  final LogtapQueueStore? queueStore;
 
   final LogtapUser? user;
   final JsonMap? globalFields;
@@ -119,6 +128,8 @@ class LogtapClientOptions {
     this.persistDeviceId = true,
     this.deviceId,
     this.deviceIdStore,
+    this.persistQueue = false,
+    this.queueStore,
     this.user,
     this.globalFields,
     this.globalProperties,

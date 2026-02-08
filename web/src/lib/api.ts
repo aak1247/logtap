@@ -15,9 +15,46 @@ type ApiEnvelope<T> = {
 export type MetricsToday = {
   project_id: number;
   date: string;
+  logs: number;
   events: number;
   errors: number;
   users: number;
+};
+
+export type MetricsTotal = {
+  project_id: number;
+  logs: number;
+  events: number;
+  users: number;
+};
+
+export type StorageEstimateTable = {
+  count: number;
+  sample_size: number;
+  avg_row_bytes: number;
+  est_bytes: number;
+};
+
+export type StorageEstimate = {
+  project_id: number;
+  logs: StorageEstimateTable;
+  events: StorageEstimateTable;
+  total_bytes: number;
+  estimated_at: string;
+};
+
+export type CleanupPolicy = {
+  project_id: number;
+  enabled: boolean;
+  logs_retention_days: number;
+  events_retention_days: number;
+  track_events_retention_days: number;
+  schedule_hour_utc: number;
+  schedule_minute_utc: number;
+  last_run_at?: string;
+  next_run_at?: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type User = { id: number; email: string };
@@ -25,7 +62,7 @@ export type LoginResponse = { token: string; user: User };
 export type BootstrapResponse = {
   token: string;
   user: User;
-  project: { id: number; name: string };
+  project: { id: string; name: string };
   key: { id: number; name: string; key: string };
 };
 
@@ -36,10 +73,10 @@ export type SystemStatusResponse = {
   message?: string;
 };
 
-export type Project = { id: number; owner_user_id: number; name: string };
+export type Project = { id: string; owner_user_id: number; name: string };
 export type ProjectKey = {
   id: number;
-  project_id: number;
+  project_id: string;
   name: string;
   key: string;
   created_at: string;
@@ -119,6 +156,78 @@ export type FunnelResponse = {
 
 export async function getMetricsToday(s: ApiSettings): Promise<MetricsToday> {
   return fetchJSON(`${s.apiBase}/api/${s.projectId}/metrics/today`, s.token);
+}
+
+export async function getMetricsTotal(s: ApiSettings): Promise<MetricsTotal> {
+  return fetchJSON(`${s.apiBase}/api/${s.projectId}/metrics/total`, s.token);
+}
+
+export async function getStorageEstimate(s: ApiSettings): Promise<StorageEstimate> {
+  return fetchJSON(`${s.apiBase}/api/${s.projectId}/storage/estimate`, s.token);
+}
+
+export async function getCleanupPolicy(s: ApiSettings): Promise<CleanupPolicy> {
+  return fetchJSON(`${s.apiBase}/api/${s.projectId}/cleanup/policy`, s.token);
+}
+
+export async function upsertCleanupPolicy(
+  s: ApiSettings,
+  req: Partial<
+    Pick<
+      CleanupPolicy,
+      | "enabled"
+      | "logs_retention_days"
+      | "events_retention_days"
+      | "track_events_retention_days"
+      | "schedule_hour_utc"
+      | "schedule_minute_utc"
+    >
+  >,
+): Promise<CleanupPolicy> {
+  return fetchJSON(`${s.apiBase}/api/${s.projectId}/cleanup/policy`, s.token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function runCleanupPolicy(
+  s: ApiSettings,
+): Promise<{
+  project_id: number;
+  logs_deleted: number;
+  events_deleted: number;
+  track_events_deleted: number;
+  logs_before?: string;
+  events_before?: string;
+  track_events_before?: string;
+  ran_at: string;
+}> {
+  return fetchJSON(`${s.apiBase}/api/${s.projectId}/cleanup/run`, s.token, {
+    method: "POST",
+  });
+}
+
+export async function cleanupLogsBefore(
+  s: ApiSettings,
+  before: string,
+): Promise<{ deleted: number }> {
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/logs/cleanup?before=${encodeURIComponent(before)}`,
+    s.token,
+    { method: "DELETE" },
+  );
+}
+
+export async function cleanupEventsBefore(
+  s: ApiSettings,
+  before: string,
+): Promise<{ deleted: number }> {
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/events/cleanup?before=${encodeURIComponent(before)}`,
+    s.token,
+    { method: "DELETE" },
+  );
 }
 
 export async function getRecentEvents(
@@ -284,16 +393,25 @@ export async function createProject(
   });
 }
 
+export async function deleteProject(
+  s: ApiSettings,
+  projectId: string,
+): Promise<{ deleted: boolean }> {
+  return fetchJSON(`${s.apiBase}/api/projects/${projectId}`, s.token, {
+    method: "DELETE",
+  });
+}
+
 export async function listProjectKeys(
   s: ApiSettings,
-  projectId: number,
+  projectId: string,
 ): Promise<{ items: ProjectKey[] }> {
   return fetchJSON(`${s.apiBase}/api/projects/${projectId}/keys`, s.token);
 }
 
 export async function createProjectKey(
   s: ApiSettings,
-  projectId: number,
+  projectId: string,
   name: string,
 ): Promise<ProjectKey> {
   return fetchJSON(`${s.apiBase}/api/projects/${projectId}/keys`, s.token, {
@@ -305,7 +423,7 @@ export async function createProjectKey(
 
 export async function revokeProjectKey(
   s: ApiSettings,
-  projectId: number,
+  projectId: string,
   keyId: number,
 ): Promise<{ revoked: boolean }> {
   return fetchJSON(`${s.apiBase}/api/projects/${projectId}/keys/${keyId}/revoke`, s.token, {

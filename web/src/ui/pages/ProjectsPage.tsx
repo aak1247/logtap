@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   createProject,
+  deleteProject,
   listProjects,
   type Project,
 } from "../../lib/api";
@@ -14,6 +15,7 @@ export function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [newProjectName, setNewProjectName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [err, setErr] = useState("");
   const [activeProjectId, setActiveProjectId] = useState(
     () => loadSettings().projectId,
@@ -98,10 +100,12 @@ export function ProjectsPage() {
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {projects.map((p) => {
-              const active = activeProjectId === String(p.id);
+              const pid = String(p.id);
+              const active = activeProjectId === pid;
+              const deleting = deletingId === pid;
               return (
                 <div
-                  key={p.id}
+                  key={pid}
                   className={`rounded-lg border border-zinc-900 bg-zinc-950 p-4 ${
                     active ? "ring-1 ring-indigo-500/40" : ""
                   }`}
@@ -111,24 +115,59 @@ export function ProjectsPage() {
                       <div className="text-sm font-semibold text-zinc-100">{p.name}</div>
                       <div className="mt-1 text-xs text-zinc-500">ID {p.id}</div>
                     </div>
-                    <button
-                      className="rounded-md border border-zinc-800 bg-zinc-950 p-1.5 text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
-                      aria-label="项目设置"
-                      onClick={() => {
-                        saveSettings({ ...settings, projectId: String(p.id) });
-                        setActiveProjectId(String(p.id));
-                        nav(`/projects?settings=project&projectId=${p.id}`);
-                      }}
-                    >
-                      <SettingsIcon className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="rounded-md border border-zinc-800 bg-zinc-950 p-1.5 text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+                        aria-label="项目设置"
+                        disabled={busy || deletingId !== null}
+                        onClick={() => {
+                          saveSettings({ ...settings, projectId: pid });
+                          setActiveProjectId(pid);
+                          nav(`/projects?settings=project&projectId=${encodeURIComponent(pid)}`);
+                        }}
+                      >
+                        <SettingsIcon className="h-4 w-4" />
+                      </button>
+                      <button
+                        className="rounded-md border border-red-900/60 bg-zinc-950 p-1.5 text-red-300 hover:bg-red-950/30 hover:text-red-100 disabled:opacity-60"
+                        aria-label="删除项目"
+                        disabled={busy || deletingId !== null}
+                        onClick={async () => {
+                          const ok = window.confirm(
+                            `确定删除项目「${p.name}」吗？该操作会删除项目下的所有数据，且不可恢复。`,
+                          );
+                          if (!ok) return;
+                          try {
+                            setErr("");
+                            setBusy(true);
+                            setDeletingId(pid);
+                            const res = await deleteProject(settings, pid);
+                            if (!res.deleted) throw new Error("删除失败");
+                            setProjects((prev) => prev.filter((x) => String(x.id) !== pid));
+                            if (loadSettings().projectId === pid) {
+                              const cur = loadSettings();
+                              saveSettings({ ...cur, projectId: "" });
+                              setActiveProjectId("");
+                            }
+                          } catch (e) {
+                            setErr(e instanceof Error ? e.message : String(e));
+                          } finally {
+                            setDeletingId(null);
+                            setBusy(false);
+                          }
+                        }}
+                      >
+                        <TrashIcon className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                   <div className="mt-3 flex items-center gap-2">
                     <button
                       className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500"
+                      disabled={deleting}
                       onClick={() => {
-                        saveSettings({ ...settings, projectId: String(p.id) });
-                        setActiveProjectId(String(p.id));
+                        saveSettings({ ...settings, projectId: pid });
+                        setActiveProjectId(pid);
                         nav("/");
                       }}
                     >
@@ -136,6 +175,9 @@ export function ProjectsPage() {
                     </button>
                     {active ? (
                       <span className="text-xs text-emerald-400">当前项目</span>
+                    ) : null}
+                    {deleting ? (
+                      <span className="text-xs text-red-300">删除中...</span>
                     ) : null}
                   </div>
                 </div>
@@ -168,6 +210,26 @@ function SettingsIcon(props: { className?: string }) {
       <circle cx="8" cy="6" r="2" />
       <circle cx="16" cy="12" r="2" />
       <circle cx="10" cy="18" r="2" />
+    </svg>
+  );
+}
+
+function TrashIcon(props: { className?: string }) {
+  return (
+    <svg
+      className={props.className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 7h16" />
+      <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+      <path d="M7 7l1 14h8l1-14" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
     </svg>
   );
 }

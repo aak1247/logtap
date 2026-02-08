@@ -12,6 +12,11 @@ const client = new LogtapClient({
   projectId: 1,
   projectKey: "pk_xxx", // 启用 AUTH_SECRET 时必填
   gzip: true, // 浏览器需要支持 CompressionStream；否则会自动降级为非 gzip
+  // 本地持久化队列（可选）：应用重启后继续发送未发送成功的日志/事件
+  // Browser: localStorage；Node: 文件
+  // persistQueue: true,
+  // queueStorageKey: "logtap_queue:prod", // Browser 可选：自定义 localStorage key
+  // queueFilePath: "/tmp/logtap-queue.json", // Node 可选：自定义文件位置
   // 批处理：尽量攒够再发，避免请求过多
   flushIntervalMs: 5000, // 最大延迟（到时间也会发）
   minBatchSize: 20,      // 达到条数立即发

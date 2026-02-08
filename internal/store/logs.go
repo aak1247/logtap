@@ -10,17 +10,26 @@ import (
 	"github.com/aak1247/logtap/internal/ingest"
 	"github.com/aak1247/logtap/internal/model"
 	"github.com/aak1247/logtap/internal/project"
+	"github.com/google/uuid"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
 func InsertLog(ctx context.Context, db *gorm.DB, projectID string, lp ingest.CustomLogPayload) error {
-	projectIDInt, err := project.ParseID(projectID)
+	row, err := LogRowFromPayload(projectID, lp)
 	if err != nil {
 		return err
 	}
+	return db.WithContext(ctx).Create(&row).Error
+}
+
+func LogRowFromPayload(projectID string, lp ingest.CustomLogPayload) (model.Log, error) {
+	projectIDInt, err := project.ParseID(projectID)
+	if err != nil {
+		return model.Log{}, err
+	}
 	if lp.Timestamp == nil {
-		return errors.New("timestamp required")
+		return model.Log{}, errors.New("timestamp required")
 	}
 
 	fields, _ := json.Marshal(lp.Fields)
@@ -50,5 +59,14 @@ func InsertLog(ctx context.Context, db *gorm.DB, projectID string, lp ingest.Cus
 		Message:    lp.Message,
 		Fields:     datatypes.JSON(fields),
 	}
-	return db.WithContext(ctx).Create(&row).Error
+	return row, nil
+}
+
+func LogRowFromPayloadWithIngestID(projectID string, lp ingest.CustomLogPayload, ingestID uuid.UUID) (model.Log, error) {
+	row, err := LogRowFromPayload(projectID, lp)
+	if err != nil {
+		return model.Log{}, err
+	}
+	row.IngestID = &ingestID
+	return row, nil
 }
