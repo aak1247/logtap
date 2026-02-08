@@ -1,6 +1,5 @@
 import { useSyncExternalStore, type ReactNode } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { SettingsPanel } from "./components/SettingsPanel";
 import { loadSettings, subscribeSettingsChange } from "../lib/storage";
 
 const navItem =
@@ -13,7 +12,6 @@ export function RootLayout(props?: {
 }) {
   const s = useSyncExternalStore(subscribeSettingsChange, loadSettings, loadSettings);
   const extraNavItems: ReactNode = props?.extraNavItems ?? null;
-  const allowApiBaseEdit = props?.allowApiBaseEdit ?? true;
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 border-b border-zinc-900 bg-zinc-950/90 backdrop-blur">
@@ -71,9 +69,16 @@ export function RootLayout(props?: {
               <Link to="/docs" className={navItem}>
                 文档
               </Link>
+              <NavLink
+                to="/settings"
+                className={({ isActive }) =>
+                  `${navItem} ${isActive ? navItemActive : ""}`
+                }
+              >
+                设置
+              </NavLink>
               {extraNavItems}
             </nav>
-            <SettingsPanel allowApiBaseEdit={allowApiBaseEdit} />
           </div>
         </div>
       </header>
