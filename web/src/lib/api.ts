@@ -58,12 +58,14 @@ export type CleanupPolicy = {
 };
 
 export type User = { id: number; email: string };
-export type LoginResponse = { token: string; user: User };
+export type SelfLogConfig = { project_id: string | number; project_key: string };
+export type LoginResponse = { token: string; user: User; self_log?: SelfLogConfig };
 export type BootstrapResponse = {
   token: string;
   user: User;
   project: { id: string; name: string };
   key: { id: number; name: string; key: string };
+  self_log?: SelfLogConfig;
 };
 
 export type SystemStatusResponse = {

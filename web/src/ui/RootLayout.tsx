@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet } from "react-router-dom";
 import { loadSettings, subscribeSettingsChange } from "../lib/storage";
 
 const navItem =
-  "px-3 py-2 rounded-md text-sm text-zinc-300 hover:text-zinc-100 hover:bg-zinc-900";
+  "px-3 py-2 rounded-lg text-sm text-zinc-300 transition-colors hover:text-zinc-100 hover:bg-zinc-900";
 const navItemActive = "bg-zinc-900 text-zinc-100";
 
 export function RootLayout(props?: {
@@ -24,7 +24,7 @@ export function RootLayout(props?: {
                 <span>{s.projectId ? `项目 ${s.projectId}` : "未选择项目"}</span>
                 <Link
                   to="/projects"
-                  className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+                  className="btn btn-xs btn-outline text-[11px]"
                 >
                   切换
                 </Link>

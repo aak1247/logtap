@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/aak1247/logtap/internal/migrate"
 	"github.com/aak1247/logtap/internal/obs"
 	"github.com/aak1247/logtap/internal/queue"
+	"github.com/aak1247/logtap/internal/selflog"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -72,6 +74,12 @@ func main() {
 			log.Fatalf("db migrate: %v", err)
 		}
 		cancel()
+	}
+
+	// Mirror service logs into the default project once it exists.
+	if gdb != nil {
+		base := log.Writer()
+		log.SetOutput(io.MultiWriter(base, selflog.NewWriter(gdb, publisher, "logtap")))
 	}
 
 	var recorder *metrics.RedisRecorder

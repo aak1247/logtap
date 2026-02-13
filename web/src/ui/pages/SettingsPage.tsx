@@ -13,13 +13,20 @@ import {
   type ProjectKey,
 } from "../../lib/api";
 import { clampFunnelDays, loadFunnelDays } from "../../lib/prefs";
-import { clearAuth, loadSettings, normalizeApiBase, saveSettings } from "../../lib/storage";
+import {
+  canEditApiBase,
+  clearAuth,
+  loadSettings,
+  normalizeApiBase,
+  saveSettings,
+} from "../../lib/storage";
 import { Panel } from "../components/Panel";
 
 export function SettingsPage() {
   const nav = useNavigate();
   const loc = useLocation();
   const funnelDays = useMemo(() => clampFunnelDays(loadFunnelDays()), []);
+  const apiBaseEditable = canEditApiBase();
 
   const [settings, setSettings] = useState(() => loadSettings());
   const [apiBase, setApiBase] = useState(settings.apiBase);
@@ -157,12 +164,12 @@ export function SettingsPage() {
         <div className="flex items-center gap-2">
           <Link
             to="/projects"
-            className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900"
+            className="btn btn-md btn-outline"
           >
             切换项目
           </Link>
           <button
-            className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900"
+            className="btn btn-md btn-outline"
             onClick={() => {
               clearAuth();
               window.location.href = "/login";
@@ -173,45 +180,49 @@ export function SettingsPage() {
         </div>
       </div>
 
-      <Panel title="连接设置">
-        <label className="block text-xs text-zinc-400">API Base（不要包含 /api）</label>
-        <input
-          value={apiBase}
-          onChange={(e) => setApiBase(e.target.value)}
-          placeholder="http://localhost:8080"
-          className="mt-2 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-        />
-        <div className="mt-2 text-xs text-zinc-500">
-          将会自动规范化：<span className="font-mono">{normalizeApiBase(apiBase)}</span>
-        </div>
+      {apiBaseEditable ? (
+        <Panel title="连接设置">
+          <label className="block text-xs text-zinc-400">API Base（不要包含 /api）</label>
+          <input
+            value={apiBase}
+            onChange={(e) => setApiBase(e.target.value)}
+            placeholder="http://localhost:8080"
+            className="mt-2 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+          />
+          <div className="mt-2 text-xs text-zinc-500">
+            将会自动规范化：<span className="font-mono">{normalizeApiBase(apiBase)}</span>
+          </div>
 
-        <div className="mt-4 flex items-center justify-between">
-          <button
-            className="text-xs text-zinc-400 hover:text-zinc-200"
-            onClick={() => {
-              const s = loadSettings();
-              setSettings(s);
-              setApiBase(s.apiBase);
-            }}
-          >
-            重置
-          </button>
-          <button
-            className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
-            onClick={() => {
-              const s = loadSettings();
-              saveSettings({
-                apiBase: apiBase.trim(),
-                token: s.token,
-                projectId: s.projectId,
-              });
-              window.location.reload();
-            }}
-          >
-            保存
-          </button>
-        </div>
-      </Panel>
+          <div className="mt-4 flex items-center justify-between">
+            <button
+              className="text-xs text-zinc-400 hover:text-zinc-200"
+              onClick={() => {
+                const s = loadSettings();
+                setSettings(s);
+                setApiBase(s.apiBase);
+              }}
+            >
+              重置
+            </button>
+            <button
+              className="btn btn-md btn-primary"
+              onClick={() => {
+                const s = loadSettings();
+                saveSettings({
+                  apiBase: apiBase.trim(),
+                  token: s.token,
+                  projectId: s.projectId,
+                  selfLogProjectId: s.selfLogProjectId,
+                  selfLogProjectKey: s.selfLogProjectKey,
+                });
+                window.location.reload();
+              }}
+            >
+              保存
+            </button>
+          </div>
+        </Panel>
+      ) : null}
 
       <div id="project" className="scroll-mt-24" />
       <Panel title="项目设置">
@@ -228,6 +239,24 @@ export function SettingsPage() {
             <div className="mt-2 text-xs text-zinc-500">API Base</div>
             <div className="mt-1 font-mono text-xs text-zinc-300">{settings.apiBase}</div>
           </div>
+
+          {settings.selfLogProjectId ? (
+            <div className="rounded-lg border border-zinc-900 p-3">
+              <div className="text-xs text-zinc-500">System Project（用于控制台/服务自上报）</div>
+              <div className="mt-1 font-mono text-xs text-zinc-100">{settings.selfLogProjectId}</div>
+              <div className="mt-3 flex gap-2">
+                <button
+                  className="btn btn-sm btn-outline"
+                  onClick={() => {
+                    saveSettings({ ...settings, projectId: settings.selfLogProjectId });
+                    nav("/logs");
+                  }}
+                >
+                  切换到系统项目日志
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="rounded-lg border border-zinc-900 p-3">
             <div className="text-sm font-semibold">上报示例（用任一 active Key）</div>
@@ -248,7 +277,7 @@ export function SettingsPage() {
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold">上报鉴权 Key</div>
             <button
-              className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900 disabled:opacity-60"
+              className="btn btn-sm btn-outline"
               disabled={projectBusy}
               onClick={async () => {
                 try {
@@ -314,7 +343,7 @@ export function SettingsPage() {
                     <td className="py-2 pr-0 text-right">
                       <div className="flex justify-end gap-2">
                         <button
-                          className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-900 disabled:opacity-60"
+                          className="btn btn-xs btn-outline"
                           disabled={projectBusy}
                           onClick={async () => {
                             const ok = await copyText(k.key);
@@ -329,7 +358,7 @@ export function SettingsPage() {
                         </button>
                         {!k.revoked_at ? (
                           <button
-                            className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-900 disabled:opacity-60"
+                            className="btn btn-xs btn-outline"
                             disabled={projectBusy}
                             onClick={async () => {
                               try {
@@ -445,7 +474,7 @@ export function SettingsPage() {
 
                 <div className="flex flex-wrap items-center gap-2">
                   <button
-                    className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60"
+                    className="btn btn-md btn-primary"
                     disabled={cleanupBusy}
                     onClick={async () => {
                       if (!policyDraft) return;
@@ -479,7 +508,7 @@ export function SettingsPage() {
                     保存策略
                   </button>
                   <button
-                    className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900 disabled:opacity-60"
+                    className="btn btn-md btn-outline"
                     disabled={cleanupBusy || !policy?.enabled}
                     onClick={async () => {
                       try {
@@ -531,7 +560,7 @@ export function SettingsPage() {
 
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900 disabled:opacity-60"
+                  className="btn btn-md btn-outline"
                   disabled={cleanupBusy}
                   onClick={async () => {
                     try {
@@ -550,7 +579,7 @@ export function SettingsPage() {
                   清理日志
                 </button>
                 <button
-                  className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900 disabled:opacity-60"
+                  className="btn btn-md btn-outline"
                   disabled={cleanupBusy}
                   onClick={async () => {
                     try {
@@ -583,7 +612,7 @@ function CodeBlock(props: { title: string; text: string }) {
       <div className="flex items-center justify-between">
         <div className="text-xs text-zinc-500">{props.title}</div>
         <button
-          className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-900"
+          className="btn btn-xs btn-outline"
           onClick={async () => {
             try {
               await navigator.clipboard.writeText(props.text);

@@ -2,6 +2,100 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    color-scheme: dark;
+
+    --scrollbar-track: rgba(9, 9, 11, 0.35);
+    --scrollbar-thumb: rgba(63, 63, 70, 0.8);
+    --scrollbar-thumb-hover: rgba(99, 102, 241, 0.45);
+    --scrollbar-glow: rgba(34, 211, 238, 0.16);
+  }
+
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: linear-gradient(
+      180deg,
+      rgba(63, 63, 70, 0.9),
+      rgba(39, 39, 42, 0.9)
+    );
+    border-radius: 999px;
+    border: 2px solid rgba(0, 0, 0, 0);
+    background-clip: padding-box;
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+      0 0 14px var(--scrollbar-glow);
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(
+      180deg,
+      rgba(99, 102, 241, 0.7),
+      rgba(34, 211, 238, 0.45)
+    );
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+      0 0 18px rgba(99, 102, 241, 0.18),
+      0 0 26px rgba(34, 211, 238, 0.12);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-sm font-medium transition-colors disabled:opacity-60;
+  }
+
+  .btn-xs {
+    @apply px-2.5 py-1 text-xs;
+  }
+
+  .btn-sm {
+    @apply px-3 py-1.5 text-sm;
+  }
+
+  .btn-md {
+    @apply px-3 py-2 text-sm;
+  }
+
+  .btn-outline {
+    @apply border border-zinc-800 bg-zinc-950 text-zinc-200 hover:bg-zinc-900 hover:text-zinc-100;
+  }
+
+  .btn-primary {
+    @apply bg-indigo-600 text-white hover:bg-indigo-500;
+  }
+
+  .btn-danger {
+    @apply border border-red-900/60 bg-zinc-950 text-red-300 hover:bg-red-950/30 hover:text-red-100;
+  }
+
+  .btn-icon {
+    @apply inline-flex h-8 w-8 items-center justify-center rounded-sm border border-zinc-800 bg-zinc-950 text-zinc-300 transition-colors hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-60;
+  }
+
+  .btn-icon-danger {
+    @apply border-red-900/60 text-red-300 hover:bg-red-950/30 hover:text-red-100;
+  }
+}
+
 html,
 body {
   height: 100%;
@@ -11,4 +105,3 @@ code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
 }
-

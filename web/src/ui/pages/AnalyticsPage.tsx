@@ -199,7 +199,7 @@ export function AnalyticsPage() {
                   />
                 </div>
                 <div>
-                  <div className="text-xs text-zinc-400">时间范围（天，默认 7）</div>
+                  <div className="text-xs text-zinc-400">时间范围（天）</div>
                   <input
                     value={String(funnelDays)}
                     onChange={(e) => {
@@ -213,7 +213,7 @@ export function AnalyticsPage() {
                 </div>
                 <div className="flex items-end">
                   <button
-                    className="w-full rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60"
+                    className="btn btn-md btn-primary w-full"
                     onClick={async () => {
                       try {
                         setFunnelBusy(true);

@@ -69,7 +69,7 @@ export function ProjectsPage() {
         title="项目列表"
         right={
           <button
-            className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60"
+            className="btn btn-md btn-primary"
             disabled={busy}
             onClick={async () => {
               try {
@@ -117,7 +117,7 @@ export function ProjectsPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <button
-                        className="rounded-md border border-zinc-800 bg-zinc-950 p-1.5 text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+                        className="btn-icon"
                         aria-label="项目设置"
                         disabled={busy || deletingId !== null}
                         onClick={() => {
@@ -129,7 +129,7 @@ export function ProjectsPage() {
                         <SettingsIcon className="h-4 w-4" />
                       </button>
                       <button
-                        className="rounded-md border border-red-900/60 bg-zinc-950 p-1.5 text-red-300 hover:bg-red-950/30 hover:text-red-100 disabled:opacity-60"
+                        className="btn-icon btn-icon-danger"
                         aria-label="删除项目"
                         disabled={busy || deletingId !== null}
                         onClick={async () => {
@@ -163,7 +163,7 @@ export function ProjectsPage() {
                   </div>
                   <div className="mt-3 flex items-center gap-2">
                     <button
-                      className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500"
+                      className="btn btn-sm btn-primary"
                       disabled={deleting}
                       onClick={() => {
                         saveSettings({ ...settings, projectId: pid });

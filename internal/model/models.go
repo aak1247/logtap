@@ -20,6 +20,8 @@ type Project struct {
 	ID          int       `gorm:"primaryKey;autoIncrement;column:id"`
 	OwnerUserID int64     `gorm:"not null;index;column:owner_user_id"`
 	Name        string    `gorm:"type:varchar(200);not null;column:name"`
+	IsDefault   bool      `gorm:"not null;default:false;index;column:is_default"`
+	IsSystem    bool      `gorm:"not null;default:false;index;column:is_system"`
 	CreatedAt   time.Time `gorm:"not null;autoCreateTime;column:created_at"`
 }
 

@@ -21,7 +21,7 @@ func ListProjectsByOwner(ctx context.Context, db *gorm.DB, ownerUserID int64) ([
 	}
 	var rows []model.Project
 	if err := db.WithContext(ctx).
-		Where("owner_user_id = ?", ownerUserID).
+		Where("owner_user_id = ? AND is_system = ?", ownerUserID, false).
 		Order("id ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
@@ -117,4 +117,20 @@ func deleteByProjectIDIfTableExists(tx *gorm.DB, table string, projectID int) er
 		return nil
 	}
 	return tx.Exec("DELETE FROM "+table+" WHERE project_id = ?", projectID).Error
+}
+
+func SetDefaultProject(ctx context.Context, db *gorm.DB, ownerUserID int64, projectID int) error {
+	if db == nil || ownerUserID <= 0 || projectID <= 0 {
+		return nil
+	}
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.Project{}).
+			Where("owner_user_id = ?", ownerUserID).
+			Update("is_default", false).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.Project{}).
+			Where("id = ? AND owner_user_id = ?", projectID, ownerUserID).
+			Update("is_default", true).Error
+	})
 }

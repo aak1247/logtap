@@ -24,6 +24,7 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
 	router.Use(maintenanceMiddleware(cfg.MaintenanceMode))
+	router.Use(errorLogMiddleware())
 	if stats != nil {
 		router.Use(observabilityMiddleware(stats))
 	}
@@ -124,13 +125,11 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 			queryAPI.GET("/analytics/events/top", query.TopEventsHandler(db))
 			queryAPI.GET("/analytics/funnel", query.FunnelHandler(db))
 		}
-		if recorder != nil {
-			queryAPI.GET("/metrics/today", query.MetricsTodayHandler(recorder))
-			queryAPI.GET("/metrics/total", query.MetricsTotalHandler(recorder))
-			queryAPI.GET("/analytics/active", query.ActiveSeriesHandler(recorder))
-			queryAPI.GET("/analytics/dist", query.DistributionHandler(recorder))
-			queryAPI.GET("/analytics/retention", query.RetentionHandler(recorder))
-		}
+		queryAPI.GET("/metrics/today", query.MetricsTodayHandler(recorder))
+		queryAPI.GET("/metrics/total", query.MetricsTotalHandler(recorder))
+		queryAPI.GET("/analytics/active", query.ActiveSeriesHandler(recorder))
+		queryAPI.GET("/analytics/dist", query.DistributionHandler(recorder))
+		queryAPI.GET("/analytics/retention", query.RetentionHandler(recorder))
 	}
 
 	return &http.Server{

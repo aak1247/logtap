@@ -483,15 +483,15 @@ type funnelTableSpec struct {
 	AliasFilter string
 }
 
-func computeFunnelCountsFromTableSQL(ctx context.Context, db *gorm.DB, projectID int, steps []string, start, end time.Time, withinSec int64, spec funnelTableSpec) ([]int64, error) {
+func buildFunnelCountsSQL(db *gorm.DB, projectID int, steps []string, start, end time.Time, withinSec int64, spec funnelTableSpec) (string, []any, error) {
 	if db == nil {
-		return nil, gorm.ErrInvalidDB
+		return "", nil, gorm.ErrInvalidDB
 	}
 	if projectID <= 0 {
-		return nil, gorm.ErrInvalidData
+		return "", nil, gorm.ErrInvalidData
 	}
 	if len(steps) < 2 {
-		return nil, gorm.ErrInvalidData
+		return "", nil, gorm.ErrInvalidData
 	}
 	if len(steps) > 8 {
 		steps = steps[:8]
@@ -518,7 +518,7 @@ func computeFunnelCountsFromTableSQL(ctx context.Context, db *gorm.DB, projectID
 
 	// s1: cohort = users who did step1 in range; store t1_us.
 	b.WriteString("WITH s1 AS (")
-	b.WriteString(" SELECT distinct_id, CAST(MIN(" + epochUS + ") AS INTEGER) AS t1_us")
+	b.WriteString(" SELECT distinct_id, CAST(MIN(" + epochUS + ") AS BIGINT) AS t1_us")
 	b.WriteString(" FROM " + spec.Table)
 	b.WriteString(" WHERE project_id = ? AND " + spec.RootFilter)
 	b.WriteString(" AND timestamp >= ? AND timestamp <= ? AND " + spec.NameCol + " = ?")
@@ -542,17 +542,22 @@ func computeFunnelCountsFromTableSQL(ctx context.Context, db *gorm.DB, projectID
 			b.WriteString(", " + prevCTE + fmt.Sprintf(".t%d_us", j))
 		}
 		b.WriteString(", (")
-		b.WriteString(" SELECT CAST(MIN(" + epochUSAlias("l") + ") AS INTEGER)")
+		b.WriteString(" SELECT CAST(MIN(" + epochUSAlias("l") + ") AS BIGINT)")
 		b.WriteString(" FROM " + spec.Table + " l")
 		b.WriteString(" WHERE l.project_id = ? AND " + spec.AliasFilter + " AND l.distinct_id = " + prevCTE + ".distinct_id")
 		b.WriteString(" AND l.timestamp >= ? AND l.timestamp <= ? AND l." + spec.NameCol + " = ?")
 		b.WriteString(" AND " + epochUSAlias("l") + " >= " + prevCTE + "." + prevCol)
-		b.WriteString(" AND (? = 0 OR " + epochUSAlias("l") + " <= " + prevCTE + ".t1_us + ?)")
+		if withinUS > 0 {
+			b.WriteString(" AND " + epochUSAlias("l") + " <= " + prevCTE + ".t1_us + CAST(? AS BIGINT)")
+		}
 		b.WriteString(" ) AS " + curCol)
 		b.WriteString(" FROM " + prevCTE)
 		b.WriteString(")")
 
-		args = append(args, projectID, start, end, stepName, withinUS, withinUS)
+		args = append(args, projectID, start, end, stepName)
+		if withinUS > 0 {
+			args = append(args, withinUS)
+		}
 		prevCTE = cte
 		prevCol = curCol
 	}
@@ -569,8 +574,17 @@ func computeFunnelCountsFromTableSQL(ctx context.Context, db *gorm.DB, projectID
 	}
 	b.WriteString(" FROM " + prevCTE)
 
+	return b.String(), args, nil
+}
+
+func computeFunnelCountsFromTableSQL(ctx context.Context, db *gorm.DB, projectID int, steps []string, start, end time.Time, withinSec int64, spec funnelTableSpec) ([]int64, error) {
+	sql, args, err := buildFunnelCountsSQL(db, projectID, steps, start, end, withinSec, spec)
+	if err != nil {
+		return nil, err
+	}
+
 	var row funnelCountsRow
-	if err := db.WithContext(ctx).Raw(b.String(), args...).Scan(&row).Error; err != nil {
+	if err := db.WithContext(ctx).Raw(sql, args...).Scan(&row).Error; err != nil {
 		return nil, err
 	}
 

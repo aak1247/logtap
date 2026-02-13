@@ -71,8 +71,18 @@ func BootstrapHandler(db *gorm.DB, authSecret []byte, tokenTTL time.Duration) gi
 			respondErr(c, http.StatusServiceUnavailable, err.Error())
 			return
 		}
+		if err := store.SetDefaultProject(ctx, db, uid, project.ID); err != nil {
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
 
 		key, err := store.CreateProjectKey(ctx, db, project.ID, firstNonEmpty(req.KeyName, "default"))
+		if err != nil {
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+
+		sys, err := store.EnsureSystemIngestConfig(ctx, db, uid)
 		if err != nil {
 			respondErr(c, http.StatusServiceUnavailable, err.Error())
 			return
@@ -95,6 +105,10 @@ func BootstrapHandler(db *gorm.DB, authSecret []byte, tokenTTL time.Duration) gi
 				"id":   key.ID,
 				"name": key.Name,
 				"key":  key.Key,
+			},
+			"self_log": gin.H{
+				"project_id":  sys.ProjectID,
+				"project_key": sys.ProjectKey,
 			},
 		})
 	}
@@ -139,9 +153,19 @@ func LoginHandler(db *gorm.DB, authSecret []byte, tokenTTL time.Duration) gin.Ha
 			respondErr(c, http.StatusServiceUnavailable, err.Error())
 			return
 		}
+
+		sys, err := store.EnsureSystemIngestConfig(ctx, db, u.ID)
+		if err != nil {
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
 		respondOK(c, gin.H{
 			"token": token,
 			"user":  UserDTO{ID: u.ID, Email: u.Email},
+			"self_log": gin.H{
+				"project_id":  sys.ProjectID,
+				"project_key": sys.ProjectKey,
+			},
 		})
 	}
 }

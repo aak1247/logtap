@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { getSystemStatus, login } from "../../lib/api";
-import { loadSettings, normalizeApiBase, saveSettings } from "../../lib/storage";
+import {
+  canEditApiBase,
+  isApiBaseLocked,
+  loadSettings,
+  normalizeApiBase,
+  saveSettings,
+} from "../../lib/storage";
 import { Panel } from "../components/Panel";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -15,6 +21,8 @@ export function LoginPage() {
   const [statusErr, setStatusErr] = useState("");
   const [loginErr, setLoginErr] = useState("");
   const [statusChecked, setStatusChecked] = useState(false);
+  const apiBaseLocked = isApiBaseLocked();
+  const apiBaseEditable = canEditApiBase();
 
   useEffect(() => {
     if (initial.token) nav("/projects");
@@ -64,21 +72,25 @@ export function LoginPage() {
         </div>
       ) : null}
 
-      <Panel title="连接">
-        <label className="block text-xs text-zinc-400">API Base（不要包含 /api）</label>
-        <input
-          value={apiBase}
-          onChange={(e) => {
-            const raw = e.target.value;
-            setApiBase(raw);
-            const base = normalizeApiBase(raw);
-            const s = loadSettings();
-            if (s.apiBase !== base) saveSettings({ ...s, apiBase: base });
-          }}
-          placeholder="http://localhost:8080"
-          className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-        />
-      </Panel>
+      {apiBaseEditable ? (
+        <Panel title="连接">
+          <label className="block text-xs text-zinc-400">API Base（不要包含 /api）</label>
+          <input
+            value={apiBase}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setApiBase(raw);
+              if (!apiBaseLocked) {
+                const base = normalizeApiBase(raw);
+                const s = loadSettings();
+                if (s.apiBase !== base) saveSettings({ ...s, apiBase: base });
+              }
+            }}
+            placeholder="http://localhost:8080"
+            className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+          />
+        </Panel>
+      ) : null}
 
       <Panel title="账号">
         <div className="grid grid-cols-1 gap-3">
@@ -103,7 +115,7 @@ export function LoginPage() {
           </div>
           <div className="flex gap-2">
             <button
-              className="flex-1 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60"
+              className="btn btn-md btn-primary flex-1"
               disabled={busy || !canLogin}
               onClick={async () => {
                 try {
@@ -111,7 +123,14 @@ export function LoginPage() {
                   setLoginErr("");
                   const base = normalizeApiBase(apiBase);
                   const res = await login(base, email.trim(), password);
-                  saveSettings({ apiBase: base, token: res.token, projectId: "" });
+                  const cur = loadSettings();
+                  saveSettings({
+                    apiBase: base,
+                    token: res.token,
+                    projectId: "",
+                    selfLogProjectId: res.self_log ? String(res.self_log.project_id) : cur.selfLogProjectId,
+                    selfLogProjectKey: res.self_log?.project_key || cur.selfLogProjectKey,
+                  });
                   window.location.href = "/projects";
                 } catch (e) {
                   setLoginErr(e instanceof Error ? e.message : String(e));
