@@ -11,6 +11,7 @@ import { ProjectsPage } from "./ui/pages/ProjectsPage";
 import { BootstrapPage } from "./ui/pages/BootstrapPage";
 import { DocsPage } from "./ui/pages/DocsPage";
 import { SettingsPage } from "./ui/pages/SettingsPage";
+import { AlertsPage } from "./ui/pages/AlertsPage";
 import { loadSettings, subscribeSettingsChange } from "./lib/storage";
 
 function RequireAuth(props: { children: ReactNode }) {
@@ -37,6 +38,7 @@ export const router = createBrowserRouter([
       { path: "events", element: <EventsPage /> },
       { path: "events/:eventId", element: <EventDetailPage /> },
       { path: "logs", element: <LogsPage /> },
+      { path: "alerts", element: <AlertsPage /> },
       { path: "settings", element: <SettingsPage /> },
     ],
   },

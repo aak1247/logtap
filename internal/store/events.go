@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aak1247/logtap/internal/alert"
 	"github.com/aak1247/logtap/internal/identity"
 	"github.com/aak1247/logtap/internal/model"
 	"github.com/aak1247/logtap/internal/project"
@@ -20,7 +21,19 @@ func InsertEvent(ctx context.Context, db *gorm.DB, projectID string, event map[s
 	if err != nil {
 		return err
 	}
-	return db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
+	res := db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil
+	}
+
+	// Best-effort alert evaluation; must not break the ingest path.
+	evalCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	_ = alert.NewEngine(db).Evaluate(evalCtx, alert.InputFromEvent(row))
+	return nil
 }
 
 func EventRowFromMap(projectID string, event map[string]any) (model.Event, error) {

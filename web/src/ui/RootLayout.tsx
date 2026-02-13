@@ -66,6 +66,14 @@ export function RootLayout(props?: {
               >
                 日志
               </NavLink>
+              <NavLink
+                to="/alerts"
+                className={({ isActive }) =>
+                  `${navItem} ${isActive ? navItemActive : ""}`
+                }
+              >
+                报警
+              </NavLink>
               <Link to="/docs" className={navItem}>
                 文档
               </Link>

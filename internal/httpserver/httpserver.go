@@ -124,6 +124,37 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 			queryAPI.POST("/cleanup/run", query.RunCleanupPolicyHandler(db))
 			queryAPI.GET("/analytics/events/top", query.TopEventsHandler(db))
 			queryAPI.GET("/analytics/funnel", query.FunnelHandler(db))
+
+			alerts := queryAPI.Group("/alerts")
+			{
+				alerts.GET("/contacts", query.ListAlertContactsHandler(db))
+				alerts.POST("/contacts", query.CreateAlertContactHandler(db))
+				alerts.PUT("/contacts/:contactId", query.UpdateAlertContactHandler(db))
+				alerts.DELETE("/contacts/:contactId", query.DeleteAlertContactHandler(db))
+
+				alerts.GET("/contact-groups", query.ListAlertContactGroupsHandler(db))
+				alerts.POST("/contact-groups", query.CreateAlertContactGroupHandler(db))
+				alerts.PUT("/contact-groups/:groupId", query.UpdateAlertContactGroupHandler(db))
+				alerts.DELETE("/contact-groups/:groupId", query.DeleteAlertContactGroupHandler(db))
+
+				alerts.GET("/wecom-bots", query.ListAlertWecomBotsHandler(db))
+				alerts.POST("/wecom-bots", query.CreateAlertWecomBotHandler(db))
+				alerts.PUT("/wecom-bots/:botId", query.UpdateAlertWecomBotHandler(db))
+				alerts.DELETE("/wecom-bots/:botId", query.DeleteAlertWecomBotHandler(db))
+
+				alerts.GET("/webhook-endpoints", query.ListAlertWebhookEndpointsHandler(db))
+				alerts.POST("/webhook-endpoints", query.CreateAlertWebhookEndpointHandler(db))
+				alerts.PUT("/webhook-endpoints/:endpointId", query.UpdateAlertWebhookEndpointHandler(db))
+				alerts.DELETE("/webhook-endpoints/:endpointId", query.DeleteAlertWebhookEndpointHandler(db))
+
+				alerts.GET("/rules", query.ListAlertRulesHandler(db))
+				alerts.POST("/rules", query.CreateAlertRuleHandler(db))
+				alerts.POST("/rules/test", query.TestAlertRulesHandler(db))
+				alerts.PUT("/rules/:ruleId", query.UpdateAlertRuleHandler(db))
+				alerts.DELETE("/rules/:ruleId", query.DeleteAlertRuleHandler(db))
+
+				alerts.GET("/deliveries", query.ListAlertDeliveriesHandler(db))
+			}
 		}
 		queryAPI.GET("/metrics/today", query.MetricsTodayHandler(recorder))
 		queryAPI.GET("/metrics/total", query.MetricsTotalHandler(recorder))

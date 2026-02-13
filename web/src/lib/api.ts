@@ -85,6 +85,111 @@ export type ProjectKey = {
   revoked_at?: string;
 };
 
+export type AlertContact = {
+  id: number;
+  project_id: number;
+  type: "email" | "sms";
+  name: string;
+  value: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AlertContactGroup = {
+  id: number;
+  project_id: number;
+  type: "email" | "sms";
+  name: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AlertContactGroupWithMembers = AlertContactGroup & {
+  memberContactIds: number[];
+};
+
+export type AlertContactGroupUpsertResponse = {
+  group: AlertContactGroup;
+  memberContactIds: number[];
+};
+
+export type AlertWecomBot = {
+  id: number;
+  project_id: number;
+  name: string;
+  webhook_url: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AlertWebhookEndpoint = {
+  id: number;
+  project_id: number;
+  name: string;
+  url: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AlertRuleSource = "logs" | "events" | "both";
+
+export type AlertRule = {
+  id: number;
+  project_id: number;
+  name: string;
+  enabled: boolean;
+  source: AlertRuleSource;
+  match: Record<string, unknown>;
+  repeat: Record<string, unknown>;
+  targets: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AlertDelivery = {
+  id: number;
+  project_id: number;
+  rule_id: number;
+  channel_type: "wecom" | "webhook" | "email" | "sms";
+  target: string;
+  title: string;
+  content: string;
+  status: "pending" | "processing" | "sent" | "failed";
+  attempts: number;
+  next_attempt_at: string;
+  last_error: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AlertDeliveryPreview = {
+  channelType: string;
+  target: string;
+  title: string;
+  content: string;
+};
+
+export type AlertRulePreview = {
+  ruleId: number;
+  ruleName: string;
+  matched: boolean;
+  dedupeKeyHash?: string;
+  windowSec?: number;
+  threshold?: number;
+  occurrences?: number;
+  occurrencesBefore?: number;
+  occurrencesAfter?: number;
+  backoffExpBefore?: number;
+  backoffExpAfter?: number;
+  nextAllowedAtBefore?: string;
+  nextAllowedAtAfter?: string;
+  windowExpired?: boolean;
+  willEnqueue?: boolean;
+  suppressedReason?: string;
+  suppressedMessage?: string;
+  deliveries?: AlertDeliveryPreview[];
+};
+
 export type RecentEvent = {
   id: string;
   timestamp: string;
@@ -431,6 +536,256 @@ export async function revokeProjectKey(
   return fetchJSON(`${s.apiBase}/api/projects/${projectId}/keys/${keyId}/revoke`, s.token, {
     method: "POST",
   });
+}
+
+function alertsBase(s: ApiSettings): string {
+  return `${s.apiBase}/api/${s.projectId}/alerts`;
+}
+
+export async function listAlertContacts(
+  s: ApiSettings,
+  params?: { type?: "email" | "sms" },
+): Promise<{ items: AlertContact[] }> {
+  const usp = new URLSearchParams();
+  if (params?.type) usp.set("type", params.type);
+  const qs = usp.toString();
+  return fetchJSON(`${alertsBase(s)}/contacts${qs ? `?${qs}` : ""}`, s.token);
+}
+
+export async function createAlertContact(
+  s: ApiSettings,
+  req: { type: "email" | "sms"; name: string; value: string },
+): Promise<AlertContact> {
+  return fetchJSON(`${alertsBase(s)}/contacts`, s.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function updateAlertContact(
+  s: ApiSettings,
+  contactId: number,
+  req: { name?: string; value?: string },
+): Promise<AlertContact> {
+  return fetchJSON(`${alertsBase(s)}/contacts/${contactId}`, s.token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function deleteAlertContact(
+  s: ApiSettings,
+  contactId: number,
+): Promise<{ deleted: boolean }> {
+  return fetchJSON(`${alertsBase(s)}/contacts/${contactId}`, s.token, {
+    method: "DELETE",
+  });
+}
+
+export async function listAlertContactGroups(
+  s: ApiSettings,
+  params?: { type?: "email" | "sms" },
+): Promise<{ items: AlertContactGroupWithMembers[] }> {
+  const usp = new URLSearchParams();
+  if (params?.type) usp.set("type", params.type);
+  const qs = usp.toString();
+  return fetchJSON(`${alertsBase(s)}/contact-groups${qs ? `?${qs}` : ""}`, s.token);
+}
+
+export async function createAlertContactGroup(
+  s: ApiSettings,
+  req: { type: "email" | "sms"; name: string; memberContactIds: number[] },
+): Promise<AlertContactGroupUpsertResponse> {
+  return fetchJSON(`${alertsBase(s)}/contact-groups`, s.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function updateAlertContactGroup(
+  s: ApiSettings,
+  groupId: number,
+  req: { name?: string; memberContactIds?: number[] },
+): Promise<AlertContactGroupUpsertResponse> {
+  return fetchJSON(`${alertsBase(s)}/contact-groups/${groupId}`, s.token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function deleteAlertContactGroup(
+  s: ApiSettings,
+  groupId: number,
+): Promise<{ deleted: boolean }> {
+  return fetchJSON(`${alertsBase(s)}/contact-groups/${groupId}`, s.token, {
+    method: "DELETE",
+  });
+}
+
+export async function listAlertWecomBots(
+  s: ApiSettings,
+): Promise<{ items: AlertWecomBot[] }> {
+  return fetchJSON(`${alertsBase(s)}/wecom-bots`, s.token);
+}
+
+export async function createAlertWecomBot(
+  s: ApiSettings,
+  req: { name: string; webhookUrl: string },
+): Promise<AlertWecomBot> {
+  return fetchJSON(`${alertsBase(s)}/wecom-bots`, s.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function updateAlertWecomBot(
+  s: ApiSettings,
+  botId: number,
+  req: { name?: string; webhookUrl?: string },
+): Promise<AlertWecomBot> {
+  return fetchJSON(`${alertsBase(s)}/wecom-bots/${botId}`, s.token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function deleteAlertWecomBot(
+  s: ApiSettings,
+  botId: number,
+): Promise<{ deleted: boolean }> {
+  return fetchJSON(`${alertsBase(s)}/wecom-bots/${botId}`, s.token, {
+    method: "DELETE",
+  });
+}
+
+export async function listAlertWebhookEndpoints(
+  s: ApiSettings,
+): Promise<{ items: AlertWebhookEndpoint[] }> {
+  return fetchJSON(`${alertsBase(s)}/webhook-endpoints`, s.token);
+}
+
+export async function createAlertWebhookEndpoint(
+  s: ApiSettings,
+  req: { name: string; url: string },
+): Promise<AlertWebhookEndpoint> {
+  return fetchJSON(`${alertsBase(s)}/webhook-endpoints`, s.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function updateAlertWebhookEndpoint(
+  s: ApiSettings,
+  endpointId: number,
+  req: { name?: string; url?: string },
+): Promise<AlertWebhookEndpoint> {
+  return fetchJSON(`${alertsBase(s)}/webhook-endpoints/${endpointId}`, s.token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function deleteAlertWebhookEndpoint(
+  s: ApiSettings,
+  endpointId: number,
+): Promise<{ deleted: boolean }> {
+  return fetchJSON(`${alertsBase(s)}/webhook-endpoints/${endpointId}`, s.token, {
+    method: "DELETE",
+  });
+}
+
+export async function listAlertRules(
+  s: ApiSettings,
+): Promise<{ items: AlertRule[] }> {
+  return fetchJSON(`${alertsBase(s)}/rules`, s.token);
+}
+
+export async function createAlertRule(
+  s: ApiSettings,
+  req: {
+    name: string;
+    enabled?: boolean;
+    source?: AlertRuleSource;
+    match?: Record<string, unknown>;
+    repeat?: Record<string, unknown>;
+    targets?: Record<string, unknown>;
+  },
+): Promise<AlertRule> {
+  return fetchJSON(`${alertsBase(s)}/rules`, s.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function updateAlertRule(
+  s: ApiSettings,
+  ruleId: number,
+  req: {
+    name: string;
+    enabled?: boolean;
+    source?: AlertRuleSource;
+    match?: Record<string, unknown>;
+    repeat?: Record<string, unknown>;
+    targets?: Record<string, unknown>;
+  },
+): Promise<AlertRule> {
+  return fetchJSON(`${alertsBase(s)}/rules/${ruleId}`, s.token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function deleteAlertRule(
+  s: ApiSettings,
+  ruleId: number,
+): Promise<{ deleted: boolean }> {
+  return fetchJSON(`${alertsBase(s)}/rules/${ruleId}`, s.token, {
+    method: "DELETE",
+  });
+}
+
+export async function testAlertRules(
+  s: ApiSettings,
+  req: {
+    source?: AlertRuleSource;
+    level?: string;
+    message?: string;
+    fields?: Record<string, unknown>;
+  },
+): Promise<{ items: AlertRulePreview[] }> {
+  return fetchJSON(`${alertsBase(s)}/rules/test`, s.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function listAlertDeliveries(
+  s: ApiSettings,
+  params?: {
+    status?: "pending" | "processing" | "sent" | "failed";
+    channelType?: "wecom" | "webhook" | "email" | "sms";
+    ruleId?: number;
+    limit?: number;
+  },
+): Promise<{ items: AlertDelivery[] }> {
+  const usp = new URLSearchParams();
+  if (params?.status) usp.set("status", params.status);
+  if (params?.channelType) usp.set("channelType", params.channelType);
+  if (params?.ruleId && params.ruleId > 0) usp.set("ruleId", String(params.ruleId));
+  if (params?.limit && params.limit > 0) usp.set("limit", String(params.limit));
+  const qs = usp.toString();
+  return fetchJSON(`${alertsBase(s)}/deliveries${qs ? `?${qs}` : ""}`, s.token);
 }
 
 function handleUnauthorized() {

@@ -30,6 +30,8 @@ func NewServer(t testing.TB) *Server {
 		HTTPAddr:     "127.0.0.1:0",
 		AuthSecret:   []byte(TestAuthSecret),
 		AuthTokenTTL: time.Hour,
+		// Allow httptest loopback webhooks in integration tests.
+		WebhookAllowLoopback: true,
 	}
 	publisher := &InlinePublisher{DB: db}
 

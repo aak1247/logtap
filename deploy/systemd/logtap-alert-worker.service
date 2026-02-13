@@ -1,0 +1,23 @@
+[Unit]
+Description=logtap alert-worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=logtap
+Group=logtap
+EnvironmentFile=/etc/logtap/alert-worker.env
+ExecStart=/usr/local/bin/alert-worker
+Restart=on-failure
+RestartSec=3s
+
+# Hardening (minimal)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/logtap
+
+[Install]
+WantedBy=multi-user.target

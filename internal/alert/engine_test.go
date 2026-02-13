@@ -110,3 +110,61 @@ func TestEngine_ThresholdAndBackoff(t *testing.T) {
 		t.Fatalf("expected still 1 delivery due to backoff, got %d", count)
 	}
 }
+
+func TestEngine_WindowExpiryResetsBackoff(t *testing.T) {
+	t.Parallel()
+
+	db := openAlertTestDB(t)
+
+	ep := model.AlertWebhookEndpoint{ProjectID: 1, Name: "hook", URL: "http://example.invalid/hook"}
+	if err := db.Create(&ep).Error; err != nil {
+		t.Fatalf("create webhook endpoint: %v", err)
+	}
+
+	match, _ := json.Marshal(RuleMatch{Levels: []string{"error"}, MessageKeywords: []string{"boom"}})
+	dedupeByMessage := true
+	repeat, _ := json.Marshal(RuleRepeat{
+		WindowSec:       60,
+		Threshold:       1,
+		BaseBackoffSec:  3600,
+		MaxBackoffSec:   3600,
+		DedupeByMessage: &dedupeByMessage,
+	})
+	targets, _ := json.Marshal(RuleTargets{WebhookEndpointIDs: []int{ep.ID}})
+
+	rule := model.AlertRule{
+		ProjectID: 1,
+		Name:      "Boom",
+		Enabled:   true,
+		Source:    string(SourceLogs),
+		Match:     datatypes.JSON(match),
+		Repeat:    datatypes.JSON(repeat),
+		Targets:   datatypes.JSON(targets),
+	}
+	if err := db.Create(&rule).Error; err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	e := NewEngine(db)
+	e.Now = func() time.Time { return now }
+
+	in := Input{ProjectID: 1, Source: SourceLogs, Timestamp: now, Level: "error", Message: "boom!", Fields: map[string]any{}}
+	if err := e.Evaluate(context.Background(), in); err != nil {
+		t.Fatalf("Evaluate #1: %v", err)
+	}
+
+	now = now.Add(61 * time.Second) // window expired but backoff would still be active unless reset.
+	in.Timestamp = now
+	if err := e.Evaluate(context.Background(), in); err != nil {
+		t.Fatalf("Evaluate #2: %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.AlertDelivery{}).Count(&count).Error; err != nil {
+		t.Fatalf("count deliveries: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 deliveries after window expiry, got %d", count)
+	}
+}

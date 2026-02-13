@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -18,7 +19,9 @@ func TestWorker_Webhook_Sent(t *testing.T) {
 	db := openAlertTestDB(t)
 
 	var got map[string]any
+	var gotHeader string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("X-Logtap-Delivery-Id")
 		defer r.Body.Close()
 		_ = json.NewDecoder(r.Body).Decode(&got)
 		w.WriteHeader(http.StatusOK)
@@ -42,6 +45,7 @@ func TestWorker_Webhook_Sent(t *testing.T) {
 	}
 
 	w := NewWorker(db, config.Config{})
+	w.Config.WebhookAllowLoopback = true
 	w.HTTPClient = srv.Client()
 	w.Now = func() time.Time { return now }
 
@@ -56,8 +60,14 @@ func TestWorker_Webhook_Sent(t *testing.T) {
 	if cur.Status != "sent" {
 		t.Fatalf("expected sent, got %q (last_error=%q)", cur.Status, cur.LastError)
 	}
+	if gotHeader != strconv.Itoa(d.ID) {
+		t.Fatalf("expected X-Logtap-Delivery-Id=%q, got %q", strconv.Itoa(d.ID), gotHeader)
+	}
 	if got["title"] != "t" {
 		t.Fatalf("unexpected webhook payload: %v", got)
+	}
+	if got["deliveryId"] != float64(d.ID) {
+		t.Fatalf("expected deliveryId=%d, got %v", d.ID, got["deliveryId"])
 	}
 }
 

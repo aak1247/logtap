@@ -64,86 +64,90 @@ export function LoginPage() {
   const err = loginErr || statusErr;
 
   return (
-    <div className="mx-auto max-w-lg space-y-4">
-      <div className="text-lg font-semibold">登录</div>
-      {err ? (
-        <div className="rounded-xl border border-red-900/60 bg-red-950/40 p-4 text-sm text-red-200">
-          {err}
-        </div>
-      ) : null}
-
-      {apiBaseEditable ? (
-        <Panel title="连接">
-          <label className="block text-xs text-zinc-400">API Base（不要包含 /api）</label>
-          <input
-            value={apiBase}
-            onChange={(e) => {
-              const raw = e.target.value;
-              setApiBase(raw);
-              if (!apiBaseLocked) {
-                const base = normalizeApiBase(raw);
-                const s = loadSettings();
-                if (s.apiBase !== base) saveSettings({ ...s, apiBase: base });
-              }
-            }}
-            placeholder="http://localhost:8080"
-            className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-          />
-        </Panel>
-      ) : null}
-
-      <Panel title="账号">
-        <div className="grid grid-cols-1 gap-3">
-          <div>
-            <div className="text-xs text-zinc-400">Email</div>
-            <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-            />
+    <div className="min-h-screen px-4 py-10">
+      <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-lg flex-col justify-center space-y-4">
+        <div className="text-lg font-semibold">登录</div>
+        {err ? (
+          <div className="rounded-xl border border-red-900/60 bg-red-950/40 p-4 text-sm text-red-200">
+            {err}
           </div>
-          <div>
-            <div className="text-xs text-zinc-400">Password</div>
+        ) : null}
+
+        {apiBaseEditable ? (
+          <Panel title="连接">
+            <label className="block text-xs text-zinc-400">API Base（不要包含 /api）</label>
             <input
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              type="password"
-              placeholder="********"
-              className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-            />
-          </div>
-          <div className="flex gap-2">
-            <button
-              className="btn btn-md btn-primary flex-1"
-              disabled={busy || !canLogin}
-              onClick={async () => {
-                try {
-                  setBusy(true);
-                  setLoginErr("");
-                  const base = normalizeApiBase(apiBase);
-                  const res = await login(base, email.trim(), password);
-                  const cur = loadSettings();
-                  saveSettings({
-                    apiBase: base,
-                    token: res.token,
-                    projectId: "",
-                    selfLogProjectId: res.self_log ? String(res.self_log.project_id) : cur.selfLogProjectId,
-                    selfLogProjectKey: res.self_log?.project_key || cur.selfLogProjectKey,
-                  });
-                  window.location.href = "/projects";
-                } catch (e) {
-                  setLoginErr(e instanceof Error ? e.message : String(e));
-                } finally {
-                  setBusy(false);
+              value={apiBase}
+              onChange={(e) => {
+                const raw = e.target.value;
+                setApiBase(raw);
+                if (!apiBaseLocked) {
+                  const base = normalizeApiBase(raw);
+                  const s = loadSettings();
+                  if (s.apiBase !== base) saveSettings({ ...s, apiBase: base });
                 }
               }}
-            >
-              {busy ? "登录中..." : "登录"}
-            </button>
+              placeholder="http://localhost:8080"
+              className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+            />
+          </Panel>
+        ) : null}
+
+        <Panel title="账号">
+          <div className="grid grid-cols-1 gap-3">
+            <div>
+              <div className="text-xs text-zinc-400">Email</div>
+              <input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <div className="text-xs text-zinc-400">Password</div>
+              <input
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                type="password"
+                placeholder="********"
+                className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                className="btn btn-md btn-primary flex-1"
+                disabled={busy || !canLogin}
+                onClick={async () => {
+                  try {
+                    setBusy(true);
+                    setLoginErr("");
+                    const base = normalizeApiBase(apiBase);
+                    const res = await login(base, email.trim(), password);
+                    const cur = loadSettings();
+                    saveSettings({
+                      apiBase: base,
+                      token: res.token,
+                      projectId: "",
+                      selfLogProjectId: res.self_log
+                        ? String(res.self_log.project_id)
+                        : cur.selfLogProjectId,
+                      selfLogProjectKey: res.self_log?.project_key || cur.selfLogProjectKey,
+                    });
+                    window.location.href = "/projects";
+                  } catch (e) {
+                    setLoginErr(e instanceof Error ? e.message : String(e));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {busy ? "登录中..." : "登录"}
+              </button>
+            </div>
           </div>
-        </div>
-      </Panel>
+        </Panel>
+      </div>
     </div>
   );
 }

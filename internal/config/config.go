@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -18,6 +19,7 @@ type Config struct {
 	NSQDHTTPAddress        string
 	PostgresURL            string
 	RunConsumers           bool
+	RunAlertWorker         bool
 	NSQEventChannel        string
 	NSQLogChannel          string
 	NSQMaxInFlight         int
@@ -49,6 +51,16 @@ type Config struct {
 	LogtapProxySecret      string
 	EnableDebugEndpoints   bool
 	DBRequireTimescale     bool
+
+	// Webhook security (optional). Defaults to denying loopback/private IPs.
+	WebhookAllowLoopback   bool
+	WebhookAllowPrivateIPs bool
+	WebhookAllowlistCIDRs  []netip.Prefix
+
+	// Alert cleanup (optional). Disabled when retention days <= 0.
+	AlertCleanupInterval         time.Duration
+	AlertDeliveriesRetentionDays int
+	AlertStatesRetentionDays     int
 
 	// Alerting / notifications (optional).
 	SMTPHost     string
@@ -107,39 +119,44 @@ Optional: set AUTH_SECRET_FILE=/path/to/secret (file contains the base64 secret)
 	}
 
 	cfg := Config{
-		HTTPAddr:               getenvDefault("HTTP_ADDR", ":8080"),
-		NSQDAddress:            getenvDefault("NSQD_ADDRESS", "127.0.0.1:4150"),
-		NSQDHTTPAddress:        strings.TrimSpace(os.Getenv("NSQD_HTTP_ADDRESS")),
-		PostgresURL:            strings.TrimSpace(os.Getenv("POSTGRES_URL")),
-		NSQEventChannel:        getenvDefault("NSQ_EVENT_CHANNEL", "event-consumer"),
-		NSQLogChannel:          getenvDefault("NSQ_LOG_CHANNEL", "log-consumer"),
-		NSQMaxInFlight:         parseIntDefault(getenvDefault("NSQ_MAX_IN_FLIGHT", "200"), 200),
-		NSQEventConcurrency:    parseIntDefault(getenvDefault("NSQ_EVENT_CONCURRENCY", "1"), 1),
-		NSQLogConcurrency:      parseIntDefault(getenvDefault("NSQ_LOG_CONCURRENCY", "1"), 1),
-		DBMaxOpenConns:         parseIntDefault(getenvDefault("DB_MAX_OPEN_CONNS", "10"), 10),
-		DBMaxIdleConns:         parseIntDefault(getenvDefault("DB_MAX_IDLE_CONNS", "1"), 1),
-		DBLogBatchSize:         parseIntDefault(getenvDefault("DB_LOG_BATCH_SIZE", "200"), 200),
-		DBLogFlushInterval:     parseDurationDefault(getenvDefault("DB_LOG_FLUSH_INTERVAL", "50ms"), 50*time.Millisecond),
-		DBEventBatchSize:       parseIntDefault(getenvDefault("DB_EVENT_BATCH_SIZE", "200"), 200),
-		DBEventFlushInterval:   parseDurationDefault(getenvDefault("DB_EVENT_FLUSH_INTERVAL", "50ms"), 50*time.Millisecond),
-		CleanupInterval:        parseDurationDefault(getenvDefault("CLEANUP_INTERVAL", "10m"), 10*time.Minute),
-		CleanupPolicyLimit:     parseIntDefault(getenvDefault("CLEANUP_POLICY_LIMIT", "50"), 50),
-		CleanupDeleteBatchSize: parseIntDefault(getenvDefault("CLEANUP_DELETE_BATCH_SIZE", "5000"), 5000),
-		CleanupMaxBatches:      parseIntDefault(getenvDefault("CLEANUP_MAX_BATCHES", "50"), 50),
-		CleanupBatchSleep:      parseDurationDefault(getenvDefault("CLEANUP_BATCH_SLEEP", "0s"), 0),
-		RedisAddr:              strings.TrimSpace(os.Getenv("REDIS_ADDR")),
-		RedisPassword:          os.Getenv("REDIS_PASSWORD"),
-		RedisDB:                parseIntDefault(getenvDefault("REDIS_DB", "0"), 0),
-		MetricsDayTTL:          parseDurationDefault(getenvDefault("METRICS_DAY_TTL", "4320h"), 180*24*time.Hour),
-		MetricsDistTTL:         parseDurationDefault(getenvDefault("METRICS_DIST_TTL", "2160h"), 90*24*time.Hour),
-		MetricsMonthTTL:        parseDurationDefault(getenvDefault("METRICS_MONTH_TTL", "13392h"), 18*31*24*time.Hour),
-		GeoIPCityMMDB:          strings.TrimSpace(os.Getenv("GEOIP_CITY_MMDB")),
-		GeoIPASNMMDB:           strings.TrimSpace(os.Getenv("GEOIP_ASN_MMDB")),
-		AuthSecret:             authSecret,
-		MaintenanceMode:        parseBoolDefault(getenvDefault("MAINTENANCE_MODE", "false"), false),
-		LogtapProxySecret:      strings.TrimSpace(os.Getenv("LOGTAP_PROXY_SECRET")),
-		EnableDebugEndpoints:   parseBoolDefault(getenvDefault("ENABLE_DEBUG_ENDPOINTS", "false"), false),
-		DBRequireTimescale:     parseBoolDefault(getenvDefault("DB_REQUIRE_TIMESCALE", "false"), false),
+		HTTPAddr:                     getenvDefault("HTTP_ADDR", ":8080"),
+		NSQDAddress:                  getenvDefault("NSQD_ADDRESS", "127.0.0.1:4150"),
+		NSQDHTTPAddress:              strings.TrimSpace(os.Getenv("NSQD_HTTP_ADDRESS")),
+		PostgresURL:                  strings.TrimSpace(os.Getenv("POSTGRES_URL")),
+		NSQEventChannel:              getenvDefault("NSQ_EVENT_CHANNEL", "event-consumer"),
+		NSQLogChannel:                getenvDefault("NSQ_LOG_CHANNEL", "log-consumer"),
+		NSQMaxInFlight:               parseIntDefault(getenvDefault("NSQ_MAX_IN_FLIGHT", "200"), 200),
+		NSQEventConcurrency:          parseIntDefault(getenvDefault("NSQ_EVENT_CONCURRENCY", "1"), 1),
+		NSQLogConcurrency:            parseIntDefault(getenvDefault("NSQ_LOG_CONCURRENCY", "1"), 1),
+		DBMaxOpenConns:               parseIntDefault(getenvDefault("DB_MAX_OPEN_CONNS", "10"), 10),
+		DBMaxIdleConns:               parseIntDefault(getenvDefault("DB_MAX_IDLE_CONNS", "1"), 1),
+		DBLogBatchSize:               parseIntDefault(getenvDefault("DB_LOG_BATCH_SIZE", "200"), 200),
+		DBLogFlushInterval:           parseDurationDefault(getenvDefault("DB_LOG_FLUSH_INTERVAL", "50ms"), 50*time.Millisecond),
+		DBEventBatchSize:             parseIntDefault(getenvDefault("DB_EVENT_BATCH_SIZE", "200"), 200),
+		DBEventFlushInterval:         parseDurationDefault(getenvDefault("DB_EVENT_FLUSH_INTERVAL", "50ms"), 50*time.Millisecond),
+		CleanupInterval:              parseDurationDefault(getenvDefault("CLEANUP_INTERVAL", "10m"), 10*time.Minute),
+		CleanupPolicyLimit:           parseIntDefault(getenvDefault("CLEANUP_POLICY_LIMIT", "50"), 50),
+		CleanupDeleteBatchSize:       parseIntDefault(getenvDefault("CLEANUP_DELETE_BATCH_SIZE", "5000"), 5000),
+		CleanupMaxBatches:            parseIntDefault(getenvDefault("CLEANUP_MAX_BATCHES", "50"), 50),
+		CleanupBatchSleep:            parseDurationDefault(getenvDefault("CLEANUP_BATCH_SLEEP", "0s"), 0),
+		RedisAddr:                    strings.TrimSpace(os.Getenv("REDIS_ADDR")),
+		RedisPassword:                os.Getenv("REDIS_PASSWORD"),
+		RedisDB:                      parseIntDefault(getenvDefault("REDIS_DB", "0"), 0),
+		MetricsDayTTL:                parseDurationDefault(getenvDefault("METRICS_DAY_TTL", "4320h"), 180*24*time.Hour),
+		MetricsDistTTL:               parseDurationDefault(getenvDefault("METRICS_DIST_TTL", "2160h"), 90*24*time.Hour),
+		MetricsMonthTTL:              parseDurationDefault(getenvDefault("METRICS_MONTH_TTL", "13392h"), 18*31*24*time.Hour),
+		GeoIPCityMMDB:                strings.TrimSpace(os.Getenv("GEOIP_CITY_MMDB")),
+		GeoIPASNMMDB:                 strings.TrimSpace(os.Getenv("GEOIP_ASN_MMDB")),
+		AuthSecret:                   authSecret,
+		MaintenanceMode:              parseBoolDefault(getenvDefault("MAINTENANCE_MODE", "false"), false),
+		LogtapProxySecret:            strings.TrimSpace(os.Getenv("LOGTAP_PROXY_SECRET")),
+		EnableDebugEndpoints:         parseBoolDefault(getenvDefault("ENABLE_DEBUG_ENDPOINTS", "false"), false),
+		DBRequireTimescale:           parseBoolDefault(getenvDefault("DB_REQUIRE_TIMESCALE", "false"), false),
+		WebhookAllowLoopback:         parseBoolDefault(getenvDefault("WEBHOOK_ALLOW_LOOPBACK", "false"), false),
+		WebhookAllowPrivateIPs:       parseBoolDefault(getenvDefault("WEBHOOK_ALLOW_PRIVATE_IPS", "false"), false),
+		AlertCleanupInterval:         parseDurationDefault(getenvDefault("ALERT_CLEANUP_INTERVAL", "1h"), time.Hour),
+		AlertDeliveriesRetentionDays: parseIntDefault(getenvDefault("ALERT_DELIVERIES_RETENTION_DAYS", "0"), 0),
+		AlertStatesRetentionDays:     parseIntDefault(getenvDefault("ALERT_STATES_RETENTION_DAYS", "0"), 0),
 
 		SMTPHost:     strings.TrimSpace(os.Getenv("SMTP_HOST")),
 		SMTPPort:     parseIntDefault(getenvDefault("SMTP_PORT", "587"), 587),
@@ -165,7 +182,9 @@ Optional: set AUTH_SECRET_FILE=/path/to/secret (file contains the base64 secret)
 	cfg.AuthTokenTTL = parseDurationDefault(getenvDefault("AUTH_TOKEN_TTL", "168h"), 168*time.Hour)
 
 	cfg.RunConsumers = parseBoolDefault(getenvDefault("RUN_CONSUMERS", "true"), true)
+	cfg.RunAlertWorker = parseBoolDefault(getenvDefault("RUN_ALERT_WORKER", "false"), false)
 	cfg.EnableMetrics = parseBoolDefault(getenvDefault("ENABLE_METRICS", "true"), true) && cfg.RedisAddr != ""
+	cfg.WebhookAllowlistCIDRs = parseCIDRPrefixesEnv(getenvDefault("WEBHOOK_ALLOWLIST_CIDRS", ""))
 	if strings.TrimSpace(cfg.NSQDAddress) == "" {
 		return Config{}, errors.New("NSQD_ADDRESS is required")
 	}
@@ -174,6 +193,9 @@ Optional: set AUTH_SECRET_FILE=/path/to/secret (file contains the base64 secret)
 	}
 	if cfg.RunConsumers && cfg.PostgresURL == "" {
 		return Config{}, errors.New("POSTGRES_URL is required when RUN_CONSUMERS=true")
+	}
+	if cfg.RunAlertWorker && cfg.PostgresURL == "" {
+		return Config{}, errors.New("POSTGRES_URL is required when RUN_ALERT_WORKER=true")
 	}
 	if cfg.NSQMaxInFlight <= 0 {
 		cfg.NSQMaxInFlight = 200
@@ -220,7 +242,90 @@ Optional: set AUTH_SECRET_FILE=/path/to/secret (file contains the base64 secret)
 	if cfg.CleanupBatchSleep < 0 {
 		cfg.CleanupBatchSleep = 0
 	}
+	if cfg.AlertCleanupInterval <= 0 {
+		cfg.AlertCleanupInterval = time.Hour
+	}
 	return cfg, nil
+}
+
+// FromEnvAlertWorker loads a minimal config for the standalone alert worker binary.
+// It does not require AUTH_SECRET, Redis or NSQ settings.
+func FromEnvAlertWorker() (Config, error) {
+	cfg := Config{
+		PostgresURL:    strings.TrimSpace(os.Getenv("POSTGRES_URL")),
+		DBMaxOpenConns: parseIntDefault(getenvDefault("DB_MAX_OPEN_CONNS", "10"), 10),
+		DBMaxIdleConns: parseIntDefault(getenvDefault("DB_MAX_IDLE_CONNS", "1"), 1),
+
+		WebhookAllowLoopback:         parseBoolDefault(getenvDefault("WEBHOOK_ALLOW_LOOPBACK", "false"), false),
+		WebhookAllowPrivateIPs:       parseBoolDefault(getenvDefault("WEBHOOK_ALLOW_PRIVATE_IPS", "false"), false),
+		WebhookAllowlistCIDRs:        parseCIDRPrefixesEnv(getenvDefault("WEBHOOK_ALLOWLIST_CIDRS", "")),
+		AlertCleanupInterval:         parseDurationDefault(getenvDefault("ALERT_CLEANUP_INTERVAL", "1h"), time.Hour),
+		AlertDeliveriesRetentionDays: parseIntDefault(getenvDefault("ALERT_DELIVERIES_RETENTION_DAYS", "0"), 0),
+		AlertStatesRetentionDays:     parseIntDefault(getenvDefault("ALERT_STATES_RETENTION_DAYS", "0"), 0),
+
+		SMTPHost:     strings.TrimSpace(os.Getenv("SMTP_HOST")),
+		SMTPPort:     parseIntDefault(getenvDefault("SMTP_PORT", "587"), 587),
+		SMTPFrom:     strings.TrimSpace(os.Getenv("SMTP_FROM")),
+		SMTPUsername: strings.TrimSpace(os.Getenv("SMTP_USERNAME")),
+		SMTPPassword: os.Getenv("SMTP_PASSWORD"),
+
+		SMSProvider: strings.TrimSpace(os.Getenv("SMS_PROVIDER")),
+
+		AliyunSMSAccessKeyID:     strings.TrimSpace(os.Getenv("ALIYUN_SMS_ACCESS_KEY_ID")),
+		AliyunSMSAccessKeySecret: strings.TrimSpace(os.Getenv("ALIYUN_SMS_ACCESS_KEY_SECRET")),
+		AliyunSMSSignName:        strings.TrimSpace(os.Getenv("ALIYUN_SMS_SIGN_NAME")),
+		AliyunSMSTemplateCode:    strings.TrimSpace(os.Getenv("ALIYUN_SMS_TEMPLATE_CODE")),
+		AliyunSMSRegion:          strings.TrimSpace(os.Getenv("ALIYUN_SMS_REGION")),
+
+		TencentSMSSecretID:   strings.TrimSpace(os.Getenv("TENCENT_SMS_SECRET_ID")),
+		TencentSMSSecretKey:  strings.TrimSpace(os.Getenv("TENCENT_SMS_SECRET_KEY")),
+		TencentSMSAppID:      strings.TrimSpace(os.Getenv("TENCENT_SMS_APP_ID")),
+		TencentSMSSignName:   strings.TrimSpace(os.Getenv("TENCENT_SMS_SIGN_NAME")),
+		TencentSMSTemplateID: strings.TrimSpace(os.Getenv("TENCENT_SMS_TEMPLATE_ID")),
+		TencentSMSRegion:     strings.TrimSpace(os.Getenv("TENCENT_SMS_REGION")),
+	}
+	if cfg.PostgresURL == "" {
+		return Config{}, errors.New("POSTGRES_URL is required")
+	}
+	if cfg.DBMaxOpenConns <= 0 {
+		cfg.DBMaxOpenConns = 10
+	}
+	if cfg.DBMaxIdleConns < 0 {
+		cfg.DBMaxIdleConns = 1
+	}
+	if cfg.DBMaxIdleConns > cfg.DBMaxOpenConns {
+		cfg.DBMaxIdleConns = cfg.DBMaxOpenConns
+	}
+	if cfg.SMTPPort <= 0 {
+		cfg.SMTPPort = 587
+	}
+	if cfg.AlertCleanupInterval <= 0 {
+		cfg.AlertCleanupInterval = time.Hour
+	}
+	return cfg, nil
+}
+
+func parseCIDRPrefixesEnv(raw string) []netip.Prefix {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\t'
+	})
+	out := make([]netip.Prefix, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		pr, err := netip.ParsePrefix(p)
+		if err != nil {
+			continue
+		}
+		out = append(out, pr)
+	}
+	return out
 }
 
 func getenvDefault(key, defaultValue string) string {

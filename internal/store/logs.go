@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
+	"github.com/aak1247/logtap/internal/alert"
 	"github.com/aak1247/logtap/internal/identity"
 	"github.com/aak1247/logtap/internal/ingest"
 	"github.com/aak1247/logtap/internal/model"
@@ -20,7 +22,15 @@ func InsertLog(ctx context.Context, db *gorm.DB, projectID string, lp ingest.Cus
 	if err != nil {
 		return err
 	}
-	return db.WithContext(ctx).Create(&row).Error
+	if err := db.WithContext(ctx).Create(&row).Error; err != nil {
+		return err
+	}
+
+	// Best-effort alert evaluation; must not break the ingest path.
+	evalCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	_ = alert.NewEngine(db).Evaluate(evalCtx, alert.InputFromLog(row))
+	return nil
 }
 
 func LogRowFromPayload(projectID string, lp ingest.CustomLogPayload) (model.Log, error) {

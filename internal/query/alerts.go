@@ -932,6 +932,71 @@ func ListAlertRulesHandler(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+func TestAlertRulesHandler(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if db == nil {
+			respondErr(c, http.StatusNotImplemented, "database not configured")
+			return
+		}
+		pid, err := project.ParseID(c.Param("projectId"))
+		if err != nil {
+			respondErr(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		var req struct {
+			Source  string         `json:"source"`
+			Level   string         `json:"level"`
+			Message string         `json:"message"`
+			Fields  map[string]any `json:"fields"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondErr(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		src := strings.ToLower(strings.TrimSpace(req.Source))
+		if src == "" {
+			src = string(alert.SourceBoth)
+		}
+		var source alert.Source
+		switch src {
+		case string(alert.SourceLogs):
+			source = alert.SourceLogs
+		case string(alert.SourceEvents):
+			source = alert.SourceEvents
+		case string(alert.SourceBoth):
+			source = alert.SourceBoth
+		default:
+			respondErr(c, http.StatusBadRequest, "invalid source (expected logs|events|both)")
+			return
+		}
+
+		in := alert.Input{
+			ProjectID: pid,
+			Source:    source,
+			Timestamp: time.Now().UTC(),
+			Level:     strings.TrimSpace(req.Level),
+			Message:   strings.TrimSpace(req.Message),
+			Fields:    req.Fields,
+		}
+		if in.Fields == nil {
+			in.Fields = map[string]any{}
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer cancel()
+
+		eng := alert.NewEngine(db)
+		items, err := eng.EvaluatePreview(ctx, in)
+		if err != nil {
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		respondOK(c, gin.H{"items": items})
+	}
+}
+
 func CreateAlertRuleHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if db == nil {
@@ -1057,6 +1122,75 @@ func DeleteAlertRuleHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		respondOK(c, gin.H{"deleted": true})
+	}
+}
+
+func ListAlertDeliveriesHandler(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if db == nil {
+			respondErr(c, http.StatusNotImplemented, "database not configured")
+			return
+		}
+		pid, err := project.ParseID(c.Param("projectId"))
+		if err != nil {
+			respondErr(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		status := strings.ToLower(strings.TrimSpace(c.Query("status")))
+		if status != "" && status != "pending" && status != "processing" && status != "sent" && status != "failed" {
+			respondErr(c, http.StatusBadRequest, "invalid status (expected pending|processing|sent|failed)")
+			return
+		}
+		channelType := strings.ToLower(strings.TrimSpace(c.Query("channelType")))
+		if channelType != "" && channelType != "wecom" && channelType != "webhook" && channelType != "email" && channelType != "sms" {
+			respondErr(c, http.StatusBadRequest, "invalid channelType (expected wecom|webhook|email|sms)")
+			return
+		}
+
+		limit := 50
+		if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n <= 0 {
+				respondErr(c, http.StatusBadRequest, "invalid limit")
+				return
+			}
+			limit = n
+		}
+		if limit > 200 {
+			limit = 200
+		}
+
+		ruleID := 0
+		if raw := strings.TrimSpace(c.Query("ruleId")); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n <= 0 {
+				respondErr(c, http.StatusBadRequest, "invalid ruleId")
+				return
+			}
+			ruleID = n
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer cancel()
+
+		q := db.WithContext(ctx).Where("project_id = ?", pid)
+		if status != "" {
+			q = q.Where("status = ?", status)
+		}
+		if channelType != "" {
+			q = q.Where("channel_type = ?", channelType)
+		}
+		if ruleID > 0 {
+			q = q.Where("rule_id = ?", ruleID)
+		}
+
+		var items []model.AlertDelivery
+		if err := q.Order("id DESC").Limit(limit).Find(&items).Error; err != nil {
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		respondOK(c, gin.H{"items": items})
 	}
 }
 

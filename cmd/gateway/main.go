@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aak1247/logtap/internal/alert"
 	"github.com/aak1247/logtap/internal/cleanup"
 	"github.com/aak1247/logtap/internal/config"
 	"github.com/aak1247/logtap/internal/consumer"
@@ -130,6 +131,14 @@ func main() {
 		w.Stats = stats
 		go w.Run(ctx)
 		log.Printf("cleanup worker enabled")
+	}
+
+	if gdb != nil && cfg.RunAlertWorker {
+		aw := alert.NewWorker(gdb, cfg)
+		go func() {
+			_ = aw.Run(ctx)
+		}()
+		log.Printf("alert worker enabled")
 	}
 
 	errCh := make(chan error, 1)

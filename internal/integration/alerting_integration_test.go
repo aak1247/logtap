@@ -113,3 +113,104 @@ func TestIntegration_Alerting_Webhook_Delivery(t *testing.T) {
 		t.Fatalf("unexpected webhook payload: %v", got)
 	}
 }
+
+func TestIntegration_Alerting_RulesTest(t *testing.T) {
+	t.Parallel()
+
+	srv := testkit.NewServer(t)
+	client := srv.HTTP.Client()
+	baseURL := srv.HTTP.URL
+	boot := testkit.Bootstrap(t, client, baseURL)
+
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(hook.Close)
+
+	authz := map[string]string{"Authorization": "Bearer " + boot.Token}
+
+	status, body := testkit.DoJSON(t, client, http.MethodPost,
+		fmt.Sprintf("%s/api/%d/alerts/webhook-endpoints", baseURL, boot.ProjectID),
+		map[string]any{"name": "ops", "url": hook.URL},
+		authz,
+	)
+	if status != http.StatusOK {
+		t.Fatalf("create webhook endpoint status=%d body=%s", status, string(body))
+	}
+	env := testkit.DecodeEnvelope(t, body)
+	if env.Code != 0 {
+		t.Fatalf("create webhook endpoint code=%d err=%s", env.Code, env.Err)
+	}
+	var ep model.AlertWebhookEndpoint
+	if err := json.Unmarshal(env.Data, &ep); err != nil {
+		t.Fatalf("decode endpoint: %v", err)
+	}
+
+	match := alert.RuleMatch{Levels: []string{"error"}, MessageKeywords: []string{"boom"}}
+	dedupeByMessage := true
+	repeat := alert.RuleRepeat{WindowSec: 60, Threshold: 1, BaseBackoffSec: 60, MaxBackoffSec: 60, DedupeByMessage: &dedupeByMessage}
+	targets := alert.RuleTargets{WebhookEndpointIDs: []int{ep.ID}}
+	status, body = testkit.DoJSON(t, client, http.MethodPost,
+		fmt.Sprintf("%s/api/%d/alerts/rules", baseURL, boot.ProjectID),
+		map[string]any{
+			"name":    "BoomRule",
+			"enabled": true,
+			"source":  "logs",
+			"match":   match,
+			"repeat":  repeat,
+			"targets": targets,
+		},
+		authz,
+	)
+	if status != http.StatusOK {
+		t.Fatalf("create rule status=%d body=%s", status, string(body))
+	}
+	env = testkit.DecodeEnvelope(t, body)
+	if env.Code != 0 {
+		t.Fatalf("create rule code=%d err=%s", env.Code, env.Err)
+	}
+
+	status, body = testkit.DoJSON(t, client, http.MethodPost,
+		fmt.Sprintf("%s/api/%d/alerts/rules/test", baseURL, boot.ProjectID),
+		map[string]any{
+			"source":  "logs",
+			"level":   "error",
+			"message": "boom!",
+			"fields":  map[string]any{"env": "prod"},
+		},
+		authz,
+	)
+	if status != http.StatusOK {
+		t.Fatalf("rules test status=%d body=%s", status, string(body))
+	}
+	env = testkit.DecodeEnvelope(t, body)
+	if env.Code != 0 {
+		t.Fatalf("rules test code=%d err=%s", env.Code, env.Err)
+	}
+	var data struct {
+		Items []struct {
+			RuleID      int `json:"ruleId"`
+			Matched     bool
+			WillEnqueue bool `json:"willEnqueue"`
+			Deliveries  []struct {
+				ChannelType string `json:"channelType"`
+				Target      string `json:"target"`
+			} `json:"deliveries"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		t.Fatalf("decode rules test: %v", err)
+	}
+	if len(data.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(data.Items))
+	}
+	if !data.Items[0].Matched || !data.Items[0].WillEnqueue {
+		t.Fatalf("expected matched+willEnqueue, got %+v", data.Items[0])
+	}
+	if len(data.Items[0].Deliveries) != 1 || data.Items[0].Deliveries[0].ChannelType != "webhook" || data.Items[0].Deliveries[0].Target != hook.URL {
+		t.Fatalf("unexpected deliveries: %+v", data.Items[0].Deliveries)
+	}
+	if data.Items[0].RuleID <= 0 {
+		t.Fatalf("expected ruleId > 0, got %d", data.Items[0].RuleID)
+	}
+}

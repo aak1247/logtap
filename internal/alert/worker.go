@@ -22,6 +22,7 @@ import (
 	"github.com/aak1247/logtap/internal/model"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Worker struct {
@@ -33,10 +34,16 @@ type Worker struct {
 
 func NewWorker(db *gorm.DB, cfg config.Config) *Worker {
 	return &Worker{
-		DB:         db,
-		HTTPClient: http.DefaultClient,
-		Now:        time.Now,
-		Config:     cfg,
+		DB: db,
+		HTTPClient: &http.Client{
+			Timeout: 5 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				// Prevent redirect-based SSRF bypass.
+				return http.ErrUseLastResponse
+			},
+		},
+		Now:    time.Now,
+		Config: cfg,
 	}
 }
 
@@ -47,14 +54,42 @@ func (w *Worker) Run(ctx context.Context) error {
 	t := time.NewTicker(500 * time.Millisecond)
 	defer t.Stop()
 
+	nextCleanup := time.Time{}
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-t.C:
+			if w.shouldRunCleanup(nextCleanup) {
+				nextCleanup = w.Now().UTC().Add(w.cleanupInterval())
+				cleanupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				_ = w.cleanupOnce(cleanupCtx)
+				cancel()
+			}
 			_, _ = w.ProcessOnce(ctx, 50)
 		}
 	}
+}
+
+func (w *Worker) cleanupInterval() time.Duration {
+	if w == nil {
+		return time.Hour
+	}
+	if w.Config.AlertCleanupInterval > 0 {
+		return w.Config.AlertCleanupInterval
+	}
+	return time.Hour
+}
+
+func (w *Worker) shouldRunCleanup(next time.Time) bool {
+	if w == nil {
+		return false
+	}
+	if w.Config.AlertDeliveriesRetentionDays <= 0 && w.Config.AlertStatesRetentionDays <= 0 {
+		return false
+	}
+	now := w.Now().UTC()
+	return next.IsZero() || !now.Before(next)
 }
 
 func (w *Worker) ProcessOnce(ctx context.Context, limit int) (int, error) {
@@ -66,17 +101,28 @@ func (w *Worker) ProcessOnce(ctx context.Context, limit int) (int, error) {
 	}
 	now := w.Now().UTC()
 
-	var items []model.AlertDelivery
-	if err := w.DB.WithContext(ctx).
-		Where("status = ? AND next_attempt_at <= ?", "pending", now).
-		Order("id ASC").
-		Limit(limit).
-		Find(&items).Error; err != nil {
+	// Requeue stuck processing items (e.g. worker crash) so they can be retried.
+	const processingLease = 2 * time.Minute
+	requeue := w.DB.WithContext(ctx).
+		Model(&model.AlertDelivery{}).
+		Where("status = ? AND updated_at < ?", "processing", now.Add(-processingLease)).
+		Updates(map[string]any{
+			"status":          "pending",
+			"next_attempt_at": now,
+			"updated_at":      now,
+		})
+	if requeue.Error == nil && requeue.RowsAffected > 0 {
+		workerRequeuedTotal.Add(requeue.RowsAffected)
+	}
+
+	items, err := w.claimPending(ctx, limit, now)
+	if err != nil {
 		return 0, err
 	}
 	if len(items) == 0 {
 		return 0, nil
 	}
+	workerClaimedTotal.Add(int64(len(items)))
 
 	processed := 0
 	for _, d := range items {
@@ -86,6 +132,7 @@ func (w *Worker) ProcessOnce(ctx context.Context, limit int) (int, error) {
 		if err == nil {
 			_ = w.DB.WithContext(ctx).Model(&model.AlertDelivery{}).Where("id = ?", d.ID).
 				Updates(map[string]any{"status": "sent", "updated_at": now, "last_error": ""}).Error
+			addMapCounter(workerSentTotalByChannel, d.ChannelType, 1)
 			continue
 		}
 
@@ -107,8 +154,183 @@ func (w *Worker) ProcessOnce(ctx context.Context, limit int) (int, error) {
 				"last_error":      err.Error(),
 				"updated_at":      now,
 			}).Error
+		if status == "failed" {
+			addMapCounter(workerFailedTotalByChannel, d.ChannelType, 1)
+		} else {
+			addMapCounter(workerRetryTotalByChannel, d.ChannelType, 1)
+		}
 	}
 	return processed, nil
+}
+
+func (w *Worker) cleanupOnce(ctx context.Context) error {
+	if w == nil || w.DB == nil {
+		return nil
+	}
+
+	now := w.Now().UTC()
+	deliveryDays := w.Config.AlertDeliveriesRetentionDays
+	stateDays := w.Config.AlertStatesRetentionDays
+	if deliveryDays <= 0 && stateDays <= 0 {
+		return nil
+	}
+
+	isPostgres := strings.EqualFold(strings.TrimSpace(w.DB.Dialector.Name()), "postgres")
+	const advisoryLockID int64 = 730731 // stable, app-scoped
+
+	run := func(db *gorm.DB) error {
+		if deliveryDays > 0 {
+			before := now.Add(-time.Duration(deliveryDays) * 24 * time.Hour)
+			n, err := deleteOldDeliveriesBatched(ctx, db, before, 5000, 20)
+			if err != nil {
+				return err
+			}
+			if n > 0 {
+				alertCleanupDeletedDeliveriesTotal.Add(n)
+			}
+		}
+		if stateDays > 0 {
+			before := now.Add(-time.Duration(stateDays) * 24 * time.Hour)
+			n, err := deleteOldStatesBatched(ctx, db, before, 5000, 20)
+			if err != nil {
+				return err
+			}
+			if n > 0 {
+				alertCleanupDeletedStatesTotal.Add(n)
+			}
+		}
+		return nil
+	}
+
+	if !isPostgres {
+		return run(w.DB.WithContext(ctx))
+	}
+
+	return w.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var ok bool
+		if err := tx.Raw("SELECT pg_try_advisory_xact_lock(?)", advisoryLockID).Scan(&ok).Error; err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+		return run(tx)
+	})
+}
+
+func deleteOldDeliveriesBatched(ctx context.Context, db *gorm.DB, before time.Time, batchSize int, maxBatches int) (int64, error) {
+	if db == nil {
+		return 0, nil
+	}
+	if batchSize <= 0 {
+		batchSize = 5000
+	}
+	if maxBatches <= 0 {
+		maxBatches = 1
+	}
+	var total int64
+	for i := 0; i < maxBatches; i++ {
+		res := db.WithContext(ctx).Exec(`
+			DELETE FROM alert_deliveries
+			WHERE id IN (
+				SELECT id FROM alert_deliveries
+				WHERE created_at < ? AND status IN ('sent','failed')
+				ORDER BY id
+				LIMIT ?
+			)
+		`, before, batchSize)
+		if res.Error != nil {
+			return total, res.Error
+		}
+		total += res.RowsAffected
+		if res.RowsAffected == 0 {
+			break
+		}
+		if ctx.Err() != nil {
+			return total, ctx.Err()
+		}
+	}
+	return total, nil
+}
+
+func deleteOldStatesBatched(ctx context.Context, db *gorm.DB, before time.Time, batchSize int, maxBatches int) (int64, error) {
+	if db == nil {
+		return 0, nil
+	}
+	if batchSize <= 0 {
+		batchSize = 5000
+	}
+	if maxBatches <= 0 {
+		maxBatches = 1
+	}
+	var total int64
+	for i := 0; i < maxBatches; i++ {
+		res := db.WithContext(ctx).Exec(`
+			DELETE FROM alert_states
+			WHERE id IN (
+				SELECT id FROM alert_states
+				WHERE last_seen_at < ?
+				ORDER BY id
+				LIMIT ?
+			)
+		`, before, batchSize)
+		if res.Error != nil {
+			return total, res.Error
+		}
+		total += res.RowsAffected
+		if res.RowsAffected == 0 {
+			break
+		}
+		if ctx.Err() != nil {
+			return total, ctx.Err()
+		}
+	}
+	return total, nil
+}
+
+func (w *Worker) claimPending(ctx context.Context, limit int, now time.Time) ([]model.AlertDelivery, error) {
+	var items []model.AlertDelivery
+	if w == nil || w.DB == nil {
+		return nil, nil
+	}
+
+	// Prefer row locking with SKIP LOCKED on Postgres to safely support multiple workers.
+	isPostgres := strings.EqualFold(strings.TrimSpace(w.DB.Dialector.Name()), "postgres")
+
+	err := w.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		q := tx.WithContext(ctx).
+			Where("status = ? AND next_attempt_at <= ?", "pending", now).
+			Order("id ASC").
+			Limit(limit)
+
+		if isPostgres {
+			q = q.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
+		}
+		if err := q.Find(&items).Error; err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			return nil
+		}
+		ids := make([]int, 0, len(items))
+		for _, it := range items {
+			ids = append(ids, it.ID)
+		}
+		if err := tx.WithContext(ctx).
+			Model(&model.AlertDelivery{}).
+			Where("id IN ? AND status = ?", ids, "pending").
+			Updates(map[string]any{"status": "processing", "updated_at": now}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i].Status = "processing"
+	}
+	return items, nil
 }
 
 func backoffDelay(attempt int) time.Duration {
@@ -130,7 +352,7 @@ func (w *Worker) send(ctx context.Context, d model.AlertDelivery) error {
 	case "wecom":
 		return w.sendWecom(ctx, d.Target, d.Title, d.Content)
 	case "webhook":
-		return w.sendWebhook(ctx, d.Target, d.ProjectID, d.RuleID, d.Title, d.Content)
+		return w.sendWebhook(ctx, d.ID, d.Target, d.ProjectID, d.RuleID, d.Title, d.Content)
 	case "sms":
 		return w.sendSMS(ctx, d.Target, d.Title, d.Content)
 	case "email":
@@ -167,23 +389,34 @@ func (w *Worker) sendWecom(ctx context.Context, webhookURL string, title string,
 	return nil
 }
 
-func (w *Worker) sendWebhook(ctx context.Context, urlStr string, projectID int, ruleID int, title string, content string) error {
+func (w *Worker) sendWebhook(ctx context.Context, deliveryID int, urlStr string, projectID int, ruleID int, title string, content string) error {
 	urlStr = strings.TrimSpace(urlStr)
 	if urlStr == "" {
 		return permanent(errors.New("webhook url empty"))
 	}
+	if err := ValidateWebhookURL(ctx, urlStr, WebhookValidationOptions{
+		AllowLoopback:   w.Config.WebhookAllowLoopback,
+		AllowPrivateIPs: w.Config.WebhookAllowPrivateIPs,
+		AllowlistCIDRs:  w.Config.WebhookAllowlistCIDRs,
+	}); err != nil {
+		return permanent(err)
+	}
 	body, _ := json.Marshal(map[string]any{
-		"projectId": projectID,
-		"ruleId":    ruleID,
-		"title":     title,
-		"content":   content,
-		"sentAt":    w.Now().UTC().Format(time.RFC3339Nano),
+		"deliveryId": deliveryID,
+		"projectId":  projectID,
+		"ruleId":     ruleID,
+		"title":      title,
+		"content":    content,
+		"sentAt":     w.Now().UTC().Format(time.RFC3339Nano),
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlStr, bytes.NewReader(body))
 	if err != nil {
 		return permanent(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if deliveryID > 0 {
+		req.Header.Set("X-Logtap-Delivery-Id", strconv.Itoa(deliveryID))
+	}
 	res, err := w.HTTPClient.Do(req)
 	if err != nil {
 		return err

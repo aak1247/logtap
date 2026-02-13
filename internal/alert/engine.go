@@ -28,6 +28,7 @@ func (e *Engine) Evaluate(ctx context.Context, in Input) error {
 	if e == nil || e.DB == nil {
 		return nil
 	}
+	engineEvaluateTotal.Add(1)
 	now := e.Now().UTC()
 
 	var rules []model.AlertRule
@@ -51,6 +52,7 @@ func (e *Engine) Evaluate(ctx context.Context, in Input) error {
 		if !matchRule(rm, in) {
 			continue
 		}
+		engineMatchedTotal.Add(1)
 
 		rep := RuleRepeat{}
 		_ = json.Unmarshal(r.Repeat, &rep)
@@ -128,65 +130,73 @@ func computeDedupeKeyHash(ruleID int, in Input, rep RuleRepeat) string {
 func (e *Engine) updateStateAndDecide(ctx context.Context, ruleID int, keyHash string, now time.Time, rep RuleRepeat) (bool, error) {
 	window := time.Duration(rep.WindowSec) * time.Second
 
-	state := model.AlertState{
-		RuleID:        ruleID,
-		KeyHash:       keyHash,
-		Occurrences:   0,
-		BackoffExp:    0,
-		LastSeenAt:    now,
-		LastSentAt:    time.Unix(0, 0).UTC(),
-		NextAllowedAt: time.Unix(0, 0).UTC(),
-	}
+	var shouldSend bool
+	err := e.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		state := model.AlertState{
+			RuleID:        ruleID,
+			KeyHash:       keyHash,
+			Occurrences:   0,
+			BackoffExp:    0,
+			LastSeenAt:    now,
+			LastSentAt:    time.Unix(0, 0).UTC(),
+			NextAllowedAt: time.Unix(0, 0).UTC(),
+		}
+		if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&state).Error; err != nil {
+			return err
+		}
 
-	if err := e.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&state).Error; err != nil {
-		return false, err
-	}
+		var cur model.AlertState
+		if err := tx.WithContext(ctx).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("rule_id = ? AND key_hash = ?", ruleID, keyHash).
+			First(&cur).Error; err != nil {
+			return err
+		}
 
-	var cur model.AlertState
-	if err := e.DB.WithContext(ctx).
-		Where("rule_id = ? AND key_hash = ?", ruleID, keyHash).
-		First(&cur).Error; err != nil {
-		return false, err
-	}
+		if !cur.LastSeenAt.IsZero() && now.Sub(cur.LastSeenAt) > window {
+			cur.Occurrences = 0
+			cur.BackoffExp = 0
+			cur.LastSentAt = time.Unix(0, 0).UTC()
+			cur.NextAllowedAt = time.Unix(0, 0).UTC()
+		}
+		cur.Occurrences++
+		cur.LastSeenAt = now
 
-	if !cur.LastSeenAt.IsZero() && now.Sub(cur.LastSeenAt) > window {
-		cur.Occurrences = 0
-		cur.BackoffExp = 0
-	}
-	cur.Occurrences++
-	cur.LastSeenAt = now
-
-	shouldSend := cur.Occurrences >= rep.Threshold && (cur.NextAllowedAt.IsZero() || !now.Before(cur.NextAllowedAt))
-	if shouldSend {
-		delay := time.Duration(rep.BaseBackoffSec) * time.Second
-		if cur.BackoffExp > 0 {
-			for i := 0; i < cur.BackoffExp; i++ {
-				delay *= 2
-				max := time.Duration(rep.MaxBackoffSec) * time.Second
-				if delay >= max {
-					delay = max
-					break
+		shouldSend = cur.Occurrences >= rep.Threshold && (cur.NextAllowedAt.IsZero() || !now.Before(cur.NextAllowedAt))
+		if shouldSend {
+			delay := time.Duration(rep.BaseBackoffSec) * time.Second
+			if cur.BackoffExp > 0 {
+				for i := 0; i < cur.BackoffExp; i++ {
+					delay *= 2
+					max := time.Duration(rep.MaxBackoffSec) * time.Second
+					if delay >= max {
+						delay = max
+						break
+					}
 				}
 			}
+			cur.BackoffExp++
+			cur.LastSentAt = now
+			cur.NextAllowedAt = now.Add(delay)
 		}
-		cur.BackoffExp++
-		cur.LastSentAt = now
-		cur.NextAllowedAt = now.Add(delay)
-	}
 
-	if err := e.DB.WithContext(ctx).
-		Model(&model.AlertState{}).
-		Where("id = ?", cur.ID).
-		Updates(map[string]any{
-			"occurrences":     cur.Occurrences,
-			"backoff_exp":     cur.BackoffExp,
-			"last_seen_at":    cur.LastSeenAt,
-			"last_sent_at":    cur.LastSentAt,
-			"next_allowed_at": cur.NextAllowedAt,
-		}).Error; err != nil {
+		if err := tx.WithContext(ctx).
+			Model(&model.AlertState{}).
+			Where("id = ?", cur.ID).
+			Updates(map[string]any{
+				"occurrences":     cur.Occurrences,
+				"backoff_exp":     cur.BackoffExp,
+				"last_seen_at":    cur.LastSeenAt,
+				"last_sent_at":    cur.LastSentAt,
+				"next_allowed_at": cur.NextAllowedAt,
+			}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return false, err
 	}
-
 	return shouldSend, nil
 }
 
@@ -215,6 +225,7 @@ func (e *Engine) enqueueDeliveries(ctx context.Context, rule model.AlertRule, ta
 	if len(deliveries) == 0 {
 		return nil
 	}
+	engineEnqueuedTotal.Add(int64(len(deliveries)))
 	return e.DB.WithContext(ctx).Create(&deliveries).Error
 }
 
