@@ -45,6 +45,8 @@ func OpenTestDB(t testing.TB) *gorm.DB {
 		&model.AlertRule{},
 		&model.AlertState{},
 		&model.AlertDelivery{},
+		&model.MonitorDefinition{},
+		&model.MonitorRun{},
 	); err != nil {
 		t.Fatalf("AutoMigrate: %v", err)
 	}

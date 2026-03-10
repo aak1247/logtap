@@ -221,6 +221,8 @@ export class LogtapClient {
     this._persistTimer = null;
     this._persisting = null;
     this._ready = this._persistQueue ? this._loadPersistedQueue().catch(() => {}) : Promise.resolve();
+    this._closed = false;
+    this._closing = null;
 
     if (this._flushIntervalMs > 0) {
       const tickMs = Math.max(50, Math.min(this._flushIntervalMs, 500));
@@ -389,16 +391,26 @@ export class LogtapClient {
    * @returns {Promise<void>}
    */
   async close() {
-    if (this._timer) clearInterval(this._timer);
-    this._timer = null;
-    if (this._retryTimer) clearTimeout(this._retryTimer);
-    this._retryTimer = null;
-    if (this._persistTimer) clearTimeout(this._persistTimer);
-    this._persistTimer = null;
-    await this._ready;
-    await this._awaitPending();
-    await this.flush();
-    await this._persistNow();
+    if (this._closing) return this._closing;
+    this._closing = (async () => {
+      this._closed = true;
+      if (this._timer) clearInterval(this._timer);
+      this._timer = null;
+      if (this._retryTimer) clearTimeout(this._retryTimer);
+      this._retryTimer = null;
+      if (this._persistTimer) clearTimeout(this._persistTimer);
+      this._persistTimer = null;
+      await this._ready;
+      await this._awaitPending();
+      await this.flush();
+      // flush() may schedule retry timers on failure; close() must stop them.
+      if (this._retryTimer) clearTimeout(this._retryTimer);
+      this._retryTimer = null;
+      await this._persistNow();
+    })().finally(() => {
+      this._closing = null;
+    });
+    return this._closing;
   }
 
   /**
@@ -508,6 +520,7 @@ export class LogtapClient {
   }
 
   _maybeScheduleAutoFlush() {
+    if (this._closed) return;
     if (this._minBatchSize <= 1) return;
     if (this._autoFlushScheduled) return;
     if (this._logQueue.length + this._trackQueue.length < this._minBatchSize) return;
@@ -537,6 +550,7 @@ export class LogtapClient {
   }
 
   _scheduleRetry() {
+    if (this._closed) return;
     if (this._retryTimer) return;
     this._retryTimer = setTimeout(() => {
       this._retryTimer = null;
@@ -544,6 +558,9 @@ export class LogtapClient {
         void this.flush();
       }
     }, 0);
+    if (!isBrowser() && typeof this._retryTimer?.unref === "function") {
+      this._retryTimer.unref();
+    }
   }
 
   _applyBeforeSend(payload) {

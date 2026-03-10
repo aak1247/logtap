@@ -51,6 +51,11 @@ type Config struct {
 	LogtapProxySecret      string
 	EnableDebugEndpoints   bool
 	DBRequireTimescale     bool
+	DetectorPluginDirs     []string
+	RunMonitorWorker       bool
+	MonitorTickInterval    time.Duration
+	MonitorBatchSize       int
+	MonitorLeaseDuration   time.Duration
 
 	// Webhook security (optional). Defaults to denying loopback/private IPs.
 	WebhookAllowLoopback   bool
@@ -152,6 +157,11 @@ Optional: set AUTH_SECRET_FILE=/path/to/secret (file contains the base64 secret)
 		LogtapProxySecret:            strings.TrimSpace(os.Getenv("LOGTAP_PROXY_SECRET")),
 		EnableDebugEndpoints:         parseBoolDefault(getenvDefault("ENABLE_DEBUG_ENDPOINTS", "false"), false),
 		DBRequireTimescale:           parseBoolDefault(getenvDefault("DB_REQUIRE_TIMESCALE", "false"), false),
+		DetectorPluginDirs:           parseStringListEnv(getenvDefault("DETECTOR_PLUGIN_DIRS", "")),
+		RunMonitorWorker:             parseBoolDefault(getenvDefault("RUN_MONITOR_WORKER", "false"), false),
+		MonitorTickInterval:          parseDurationDefault(getenvDefault("MONITOR_TICK_INTERVAL", "2s"), 2*time.Second),
+		MonitorBatchSize:             parseIntDefault(getenvDefault("MONITOR_BATCH_SIZE", "20"), 20),
+		MonitorLeaseDuration:         parseDurationDefault(getenvDefault("MONITOR_LEASE_DURATION", "60s"), 60*time.Second),
 		WebhookAllowLoopback:         parseBoolDefault(getenvDefault("WEBHOOK_ALLOW_LOOPBACK", "false"), false),
 		WebhookAllowPrivateIPs:       parseBoolDefault(getenvDefault("WEBHOOK_ALLOW_PRIVATE_IPS", "false"), false),
 		AlertCleanupInterval:         parseDurationDefault(getenvDefault("ALERT_CLEANUP_INTERVAL", "1h"), time.Hour),
@@ -245,6 +255,15 @@ Optional: set AUTH_SECRET_FILE=/path/to/secret (file contains the base64 secret)
 	if cfg.AlertCleanupInterval <= 0 {
 		cfg.AlertCleanupInterval = time.Hour
 	}
+	if cfg.MonitorTickInterval <= 0 {
+		cfg.MonitorTickInterval = 2 * time.Second
+	}
+	if cfg.MonitorBatchSize <= 0 {
+		cfg.MonitorBatchSize = 20
+	}
+	if cfg.MonitorLeaseDuration <= 0 {
+		cfg.MonitorLeaseDuration = 60 * time.Second
+	}
 	return cfg, nil
 }
 
@@ -324,6 +343,25 @@ func parseCIDRPrefixesEnv(raw string) []netip.Prefix {
 			continue
 		}
 		out = append(out, pr)
+	}
+	return out
+}
+
+func parseStringListEnv(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\t'
+	})
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
 	}
 	return out
 }

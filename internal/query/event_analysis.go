@@ -49,10 +49,17 @@ func TopEventsHandler(db *gorm.DB) gin.HandlerFunc {
 		defer cancel()
 
 		var out []TopEventRow
-		if rows, err := topEventsFromTrackEventDailyOnly(ctx, db, projectID, start, end, limit, q); err == nil {
+		if rows, err := topEventsFromTrackEventDailyOnly(ctx, db, projectID, start, end, limit, q); err == nil && len(rows) > 0 {
 			out = rows
-		} else if err := topEventsFromTrackEvents(ctx, db, projectID, start, end, limit, q, &out); err != nil {
-			// Fallback to logs when track_events is missing or empty.
+		}
+		if len(out) == 0 {
+			var rows []TopEventRow
+			if err := topEventsFromTrackEvents(ctx, db, projectID, start, end, limit, q, &rows); err == nil && len(rows) > 0 {
+				out = rows
+			}
+		}
+		if len(out) == 0 {
+			// Fallback to logs when track tables are unavailable or still empty.
 			if err := topEventsFromLogs(ctx, db, projectID, start, end, limit, q, &out); err != nil {
 				respondErr(c, http.StatusServiceUnavailable, err.Error())
 				return

@@ -69,12 +69,18 @@ go build -o gateway ./cmd/gateway
 
 - `deploy/systemd/logtap-gateway.service`
 - `deploy/systemd/nsqd.service`
+- `deploy/systemd/logtap-alert-worker.service`（可选：独立投递 worker）
 
 建议做法：
 
 - 创建用户/目录：`/opt/logtap/`
 - 把二进制与 `.env` 放到固定目录
 - `systemctl enable --now logtap-gateway`
+
+告警投递 worker 说明：
+
+- 若不启用 `RUN_ALERT_WORKER=true`（网关内嵌 worker），则可用独立进程 `alert-worker` 来消费 `alert_deliveries`。
+- 环境变量示例：`deploy/alert-worker.env.example`
 
 ## 3) 控制台（Web）
 

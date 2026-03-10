@@ -190,6 +190,73 @@ export type AlertRulePreview = {
   deliveries?: AlertDeliveryPreview[];
 };
 
+export type DetectorDescriptor = {
+  type: string;
+  mode: string;
+  path: string;
+};
+
+export type DetectorSchemaResponse = {
+  detectorType: string;
+  schema: unknown;
+};
+
+export type MonitorDefinition = {
+  id: number;
+  project_id: number;
+  name: string;
+  detector_type: string;
+  config: Record<string, unknown>;
+  interval_sec: number;
+  timeout_ms: number;
+  enabled: boolean;
+  next_run_at: string;
+  lease_owner: string;
+  lease_until?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MonitorRun = {
+  id: number;
+  monitor_id: number;
+  project_id: number;
+  started_at: string;
+  finished_at: string;
+  status: string;
+  signal_count: number;
+  error: string;
+  result: Record<string, unknown>;
+  created_at: string;
+};
+
+export type MonitorUpsertRequest = {
+  name: string;
+  detectorType: string;
+  config: Record<string, unknown>;
+  intervalSec?: number;
+  timeoutMs?: number;
+  enabled?: boolean;
+};
+
+export type MonitorTestSample = {
+  source: string;
+  sourceType: string;
+  severity: string;
+  status: string;
+  message: string;
+  labels?: Record<string, string>;
+  occurredAt: string;
+};
+
+export type MonitorTestResult = {
+  monitorId: number;
+  detectorType: string;
+  signalCount: number;
+  elapsedMs: number;
+  samples: MonitorTestSample[];
+};
+
 export type RecentEvent = {
   id: string;
   timestamp: string;
@@ -542,6 +609,10 @@ function alertsBase(s: ApiSettings): string {
   return `${s.apiBase}/api/${s.projectId}/alerts`;
 }
 
+function monitorsBase(s: ApiSettings): string {
+  return `${s.apiBase}/api/${s.projectId}/monitors`;
+}
+
 export async function listAlertContacts(
   s: ApiSettings,
   params?: { type?: "email" | "sms" },
@@ -786,6 +857,115 @@ export async function listAlertDeliveries(
   if (params?.limit && params.limit > 0) usp.set("limit", String(params.limit));
   const qs = usp.toString();
   return fetchJSON(`${alertsBase(s)}/deliveries${qs ? `?${qs}` : ""}`, s.token);
+}
+
+export async function listDetectors(
+  s: ApiSettings,
+): Promise<{ items: DetectorDescriptor[] }> {
+  const raw = await fetchJSON<{ items?: unknown[] }>(`${s.apiBase}/api/plugins/detectors`, s.token);
+  const items = Array.isArray(raw.items) ? raw.items.map(normalizeDetectorDescriptor).filter((v): v is DetectorDescriptor => Boolean(v)) : [];
+  return { items };
+}
+
+export async function getDetectorSchema(
+  s: ApiSettings,
+  detectorType: string,
+): Promise<DetectorSchemaResponse> {
+  const raw = await fetchJSON<{ detectorType?: unknown; schema?: unknown }>(
+    `${s.apiBase}/api/plugins/detectors/${encodeURIComponent(detectorType)}/schema`,
+    s.token,
+  );
+  return {
+    detectorType: readString(raw, ["detectorType"]) || detectorType,
+    schema: raw.schema ?? {},
+  };
+}
+
+export async function listMonitors(
+  s: ApiSettings,
+): Promise<{ items: MonitorDefinition[] }> {
+  return fetchJSON(`${monitorsBase(s)}`, s.token);
+}
+
+export async function createMonitor(
+  s: ApiSettings,
+  req: MonitorUpsertRequest,
+): Promise<MonitorDefinition> {
+  return fetchJSON(`${monitorsBase(s)}`, s.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function updateMonitor(
+  s: ApiSettings,
+  monitorId: number,
+  req: Partial<MonitorUpsertRequest>,
+): Promise<MonitorDefinition> {
+  return fetchJSON(`${monitorsBase(s)}/${monitorId}`, s.token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function deleteMonitor(
+  s: ApiSettings,
+  monitorId: number,
+): Promise<{ deleted: boolean }> {
+  return fetchJSON(`${monitorsBase(s)}/${monitorId}`, s.token, {
+    method: "DELETE",
+  });
+}
+
+export async function runMonitorNow(
+  s: ApiSettings,
+  monitorId: number,
+): Promise<{ queued: boolean }> {
+  return fetchJSON(`${monitorsBase(s)}/${monitorId}/run`, s.token, {
+    method: "POST",
+  });
+}
+
+export async function testMonitor(
+  s: ApiSettings,
+  monitorId: number,
+): Promise<MonitorTestResult> {
+  return fetchJSON(`${monitorsBase(s)}/${monitorId}/test`, s.token, {
+    method: "POST",
+  });
+}
+
+export async function listMonitorRuns(
+  s: ApiSettings,
+  monitorId: number,
+  params?: { limit?: number },
+): Promise<{ items: MonitorRun[] }> {
+  const usp = new URLSearchParams();
+  if (params?.limit && params.limit > 0) usp.set("limit", String(params.limit));
+  const qs = usp.toString();
+  return fetchJSON(`${monitorsBase(s)}/${monitorId}/runs${qs ? `?${qs}` : ""}`, s.token);
+}
+
+function normalizeDetectorDescriptor(raw: unknown): DetectorDescriptor | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const rec = raw as Record<string, unknown>;
+  const type = readString(rec, ["type", "Type"]).toLowerCase();
+  if (!type) return null;
+  return {
+    type,
+    mode: readString(rec, ["mode", "Mode"]),
+    path: readString(rec, ["path", "Path"]),
+  };
+}
+
+function readString(rec: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = rec[key];
+    if (typeof value === "string") return value.trim();
+  }
+  return "";
 }
 
 function handleUnauthorized() {

@@ -6,7 +6,7 @@ type Settings = {
   selfLogProjectKey: string;
 };
 
-const legacyKey = "logtap:settings:v1";
+const settingsStorageKey = "logtap:settings:v1";
 const settingsChangedEvent = "logtap:settings-changed";
 
 let cachedSettings: Settings | null = null;
@@ -61,28 +61,15 @@ function sameSettings(a: Settings, b: Settings): boolean {
   );
 }
 
-function getRuntimeApiBase(): string {
-  if (typeof window === "undefined") return "";
-  const origin = window.location.origin;
-  if (origin && origin !== "null") return origin;
-  const protocol = window.location.protocol;
-  const host = window.location.host;
-  if (!protocol || !host) return "";
-  return `${protocol}//${host}`;
-}
-
 function getSettingsStorageKey(): string {
   const configured = (import.meta.env.VITE_SETTINGS_STORAGE_KEY as string | undefined) ?? "";
-  const base = configured.trim() || legacyKey;
-  const runtime = getRuntimeApiBase();
-  if (!runtime) return base;
-  return `${base}:${runtime}`;
+  return configured.trim() || settingsStorageKey;
 }
 
 function readStoredSettingsRaw(): string | null {
   if (typeof window === "undefined") return null;
   const key = getSettingsStorageKey();
-  return localStorage.getItem(key) ?? localStorage.getItem(legacyKey);
+  return localStorage.getItem(key);
 }
 
 export function canEditApiBase(): boolean {
@@ -101,15 +88,10 @@ export function canEditApiBase(): boolean {
 
 export function loadSettings(): Settings {
   const lockMode = getApiBaseLockMode();
-  const apiBase = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
+  const envApiBase = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
   const projectId =
     (import.meta.env.VITE_DEFAULT_PROJECT_ID as string | undefined) ?? "";
-  const runtimeApiBase = getRuntimeApiBase();
-  const fallbackApiBase = normalizeApiBase(
-    lockMode === "always"
-      ? apiBase || runtimeApiBase || "http://localhost:8080"
-      : runtimeApiBase || apiBase || "http://localhost:8080",
-  );
+  const fallbackApiBase = normalizeApiBase(envApiBase || "http://localhost:8080");
 
   if (typeof window === "undefined") {
     const next = { apiBase: fallbackApiBase, token: "", projectId, selfLogProjectId: "", selfLogProjectKey: "" };
@@ -119,8 +101,7 @@ export function loadSettings(): Settings {
   }
 
   try {
-    const key = getSettingsStorageKey();
-    const raw = localStorage.getItem(key) ?? localStorage.getItem(legacyKey);
+    const raw = readStoredSettingsRaw();
     if (!raw) {
       const next = {
         apiBase: fallbackApiBase,
@@ -164,10 +145,9 @@ export function saveSettings(next: Settings) {
   try {
     let apiBase = next.apiBase;
     const lockMode = getApiBaseLockMode();
+    const envApiBase = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
     if (lockMode === "always") {
-      const runtimeApiBase = getRuntimeApiBase();
-      const envApiBase = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
-      apiBase = normalizeApiBase(envApiBase || runtimeApiBase || "http://localhost:8080");
+      apiBase = normalizeApiBase(envApiBase || "http://localhost:8080");
     } else if (lockMode === "once") {
       const raw = readStoredSettingsRaw();
       if (raw) {
@@ -201,7 +181,7 @@ export function subscribeSettingsChange(listener: () => void): () => void {
 
   const onEvent: EventListener = () => listener();
   const onStorage = (e: StorageEvent) => {
-    if (e.key === key || e.key === legacyKey) listener();
+    if (e.key === key) listener();
   };
 
   window.addEventListener(settingsChangedEvent, onEvent);

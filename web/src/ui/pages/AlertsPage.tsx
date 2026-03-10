@@ -34,8 +34,9 @@ import {
 } from "../../lib/api";
 import { loadSettings, subscribeSettingsChange } from "../../lib/storage";
 import { Panel } from "../components/Panel";
+import { MonitorTab } from "./alerts/MonitorTab";
 
-type AlertsTab = "contacts" | "groups" | "channels" | "rules" | "test" | "deliveries";
+type AlertsTab = "contacts" | "groups" | "channels" | "rules" | "test" | "deliveries" | "monitors";
 
 const tabClass =
   "px-3 py-2 rounded-lg text-sm text-zinc-300 transition-colors hover:text-zinc-100 hover:bg-zinc-900";
@@ -317,6 +318,7 @@ export function AlertsPage() {
           <TabButton active={activeTab === "rules"} onClick={() => setActiveTab("rules")}>规则</TabButton>
           <TabButton active={activeTab === "test"} onClick={() => setActiveTab("test")}>规则测试</TabButton>
           <TabButton active={activeTab === "deliveries"} onClick={() => setActiveTab("deliveries")}>投递记录</TabButton>
+          <TabButton active={activeTab === "monitors"} onClick={() => setActiveTab("monitors")}>监控插件</TabButton>
         </div>
       </Panel>
 
@@ -1216,6 +1218,10 @@ export function AlertsPage() {
             </div>
           </Panel>
         </div>
+      ) : null}
+
+      {activeTab === "monitors" ? (
+        <MonitorTab settings={settings} />
       ) : null}
     </div>
   );

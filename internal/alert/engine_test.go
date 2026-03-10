@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aak1247/logtap/internal/detector"
 	"github.com/aak1247/logtap/internal/model"
 	"github.com/glebarez/sqlite"
 	"gorm.io/datatypes"
@@ -166,5 +167,67 @@ func TestEngine_WindowExpiryResetsBackoff(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatalf("expected 2 deliveries after window expiry, got %d", count)
+	}
+}
+
+func TestEngine_EvaluateSignal_RoutesThroughExistingTargets(t *testing.T) {
+	t.Parallel()
+
+	db := openAlertTestDB(t)
+
+	ep := model.AlertWebhookEndpoint{ProjectID: 1, Name: "hook", URL: "http://example.invalid/hook"}
+	if err := db.Create(&ep).Error; err != nil {
+		t.Fatalf("create webhook endpoint: %v", err)
+	}
+
+	match, _ := json.Marshal(RuleMatch{
+		Levels: []string{"error"},
+		FieldsAll: []FieldMatch{
+			{Path: "source_type", Op: OpEquals, Value: "http_check"},
+			{Path: "labels.env", Op: OpEquals, Value: "prod"},
+		},
+	})
+	repeat, _ := json.Marshal(RuleRepeat{WindowSec: 60, Threshold: 1, BaseBackoffSec: 60, MaxBackoffSec: 60})
+	targets, _ := json.Marshal(RuleTargets{WebhookEndpointIDs: []int{ep.ID}})
+
+	rule := model.AlertRule{
+		ProjectID: 1,
+		Name:      "SyntheticCritical",
+		Enabled:   true,
+		Source:    string(SourceBoth),
+		Match:     datatypes.JSON(match),
+		Repeat:    datatypes.JSON(repeat),
+		Targets:   datatypes.JSON(targets),
+	}
+	if err := db.Create(&rule).Error; err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	e := NewEngine(db)
+	sig := detector.Signal{
+		ProjectID:  1,
+		Source:     "logs",
+		SourceType: "http_check",
+		Severity:   "error",
+		Status:     "firing",
+		Message:    "probe timeout",
+		Labels: map[string]string{
+			"env": "prod",
+		},
+		Fields: map[string]any{
+			"latency_ms": 1200,
+		},
+		OccurredAt: time.Now().UTC(),
+	}
+	if err := e.EvaluateSignal(context.Background(), sig); err != nil {
+		t.Fatalf("EvaluateSignal: %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.AlertDelivery{}).Count(&count).Error; err != nil {
+		t.Fatalf("count deliveries: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 delivery, got %d", count)
 	}
 }

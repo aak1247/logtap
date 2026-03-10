@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/aak1247/logtap/internal/config"
+	"github.com/aak1247/logtap/internal/detector"
+	"github.com/aak1247/logtap/internal/detector/plugins/logbasic"
 	"github.com/aak1247/logtap/internal/httpserver"
 	"github.com/aak1247/logtap/internal/ingest"
 	"github.com/aak1247/logtap/internal/model"
@@ -89,8 +91,11 @@ func newTestServer(t *testing.T) *httptest.Server {
 		AuthTokenTTL: time.Hour,
 	}
 	publisher := &testPublisher{db: db}
+	reg := detector.NewRegistry()
+	_ = reg.RegisterStatic(logbasic.New())
+	detectorService := detector.NewService(reg)
 
-	srv := httpserver.New(cfg, publisher, db, nil, nil)
+	srv := httpserver.New(cfg, publisher, db, nil, nil, detectorService)
 	ts := httptest.NewServer(srv.Handler)
 	t.Cleanup(ts.Close)
 	return ts

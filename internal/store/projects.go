@@ -93,6 +93,8 @@ func DeleteProject(ctx context.Context, db *gorm.DB, projectID int) (bool, error
 			"alert_rules",
 			"alert_states",
 			"alert_deliveries",
+			"monitor_definitions",
+			"monitor_runs",
 		} {
 			if err := deleteByProjectIDIfTableExists(tx, table, projectID); err != nil {
 				return err

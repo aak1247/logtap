@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aak1247/logtap/internal/config"
+	"github.com/aak1247/logtap/internal/detector"
 	"github.com/aak1247/logtap/internal/ingest"
 	"github.com/aak1247/logtap/internal/metrics"
 	"github.com/aak1247/logtap/internal/obs"
@@ -19,7 +20,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *metrics.RedisRecorder, stats *obs.Stats) *http.Server {
+func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *metrics.RedisRecorder, stats *obs.Stats, detectorService *detector.Service) *http.Server {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
@@ -72,6 +73,8 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 		if !trustedProxyEnabled {
 			authed.GET("/internal/metrics", query.DebugMetricsHandler(stats))
 		}
+		authed.GET("/plugins/detectors", query.ListDetectorsHandler(detectorService))
+		authed.GET("/plugins/detectors/:detectorType/schema", query.GetDetectorSchemaHandler(detectorService))
 		authed.GET("/projects", query.ListProjectsHandler(db))
 		authed.POST("/projects", query.CreateProjectHandler(db))
 		authed.GET("/projects/:projectId", query.GetProjectHandler(db))
@@ -154,6 +157,18 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 				alerts.DELETE("/rules/:ruleId", query.DeleteAlertRuleHandler(db))
 
 				alerts.GET("/deliveries", query.ListAlertDeliveriesHandler(db))
+			}
+
+			monitors := queryAPI.Group("/monitors")
+			{
+				monitors.GET("", query.ListMonitorsHandler(db))
+				monitors.POST("", query.CreateMonitorHandler(db, detectorService))
+				monitors.GET("/:monitorId", query.GetMonitorHandler(db))
+				monitors.PUT("/:monitorId", query.UpdateMonitorHandler(db, detectorService))
+				monitors.DELETE("/:monitorId", query.DeleteMonitorHandler(db))
+				monitors.GET("/:monitorId/runs", query.ListMonitorRunsHandler(db))
+				monitors.POST("/:monitorId/run", query.RunMonitorNowHandler(db))
+				monitors.POST("/:monitorId/test", query.TestMonitorHandler(db, detectorService))
 			}
 		}
 		queryAPI.GET("/metrics/today", query.MetricsTodayHandler(recorder))

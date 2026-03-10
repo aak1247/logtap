@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/aak1247/logtap/internal/config"
+	"github.com/aak1247/logtap/internal/detector"
+	"github.com/aak1247/logtap/internal/detector/plugins/logbasic"
 	"github.com/aak1247/logtap/internal/httpserver"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -34,8 +36,11 @@ func NewServer(t testing.TB) *Server {
 		WebhookAllowLoopback: true,
 	}
 	publisher := &InlinePublisher{DB: db}
+	reg := detector.NewRegistry()
+	_ = reg.RegisterStatic(logbasic.New())
+	detectorService := detector.NewService(reg)
 
-	srv := httpserver.New(cfg, publisher, db, nil, nil)
+	srv := httpserver.New(cfg, publisher, db, nil, nil, detectorService)
 	ts := httptest.NewServer(srv.Handler)
 	t.Cleanup(ts.Close)
 

@@ -1524,6 +1524,404 @@ func Spec() map[string]any {
 					},
 				},
 			},
+			"/api/plugins/detectors": map[string]any{
+				"get": map[string]any{
+					"tags":        []string{"detectors"},
+					"summary":     "List detector plugins",
+					"operationId": "listDetectors",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "Detectors",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": envelopeSchema(map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"items": map[string]any{
+												"type":  "array",
+												"items": map[string]any{"$ref": "#/components/schemas/DetectorDescriptor"},
+											},
+										},
+										"required": []string{"items"},
+									}),
+								},
+							},
+						},
+						"401": map[string]any{"description": "Unauthorized"},
+						"503": map[string]any{"description": "Detector service unavailable"},
+					},
+				},
+			},
+			"/api/plugins/detectors/{detectorType}/schema": map[string]any{
+				"get": map[string]any{
+					"tags":        []string{"detectors"},
+					"summary":     "Get detector config schema",
+					"operationId": "getDetectorSchema",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{
+							"name":     "detectorType",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "string"},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "Schema",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": envelopeSchema(map[string]any{"$ref": "#/components/schemas/DetectorSchemaResponse"}),
+								},
+							},
+						},
+						"401": map[string]any{"description": "Unauthorized"},
+						"404": map[string]any{"description": "Detector not found"},
+						"503": map[string]any{"description": "Detector service unavailable"},
+					},
+				},
+			},
+			"/api/{projectId}/monitors": map[string]any{
+				"get": map[string]any{
+					"tags":        []string{"monitors"},
+					"summary":     "List monitors",
+					"operationId": "listMonitors",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{
+							"name":     "projectId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "Monitors",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": envelopeSchema(map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"items": map[string]any{
+												"type":  "array",
+												"items": map[string]any{"$ref": "#/components/schemas/MonitorDefinition"},
+											},
+										},
+										"required": []string{"items"},
+									}),
+								},
+							},
+						},
+						"400": map[string]any{"description": "Invalid request"},
+						"401": map[string]any{"description": "Unauthorized"},
+						"503": map[string]any{"description": "Database unavailable"},
+					},
+				},
+				"post": map[string]any{
+					"tags":        []string{"monitors"},
+					"summary":     "Create monitor",
+					"operationId": "createMonitor",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{
+							"name":     "projectId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+					},
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{
+							"application/json": map[string]any{
+								"schema": map[string]any{
+									"type": "object",
+									"properties": map[string]any{
+										"name":         map[string]any{"type": "string"},
+										"detectorType": map[string]any{"type": "string"},
+										"config":       map[string]any{"type": "object", "additionalProperties": true},
+										"intervalSec":  map[string]any{"type": "integer"},
+										"timeoutMs":    map[string]any{"type": "integer"},
+										"enabled":      map[string]any{"type": "boolean"},
+									},
+									"required": []string{"name", "detectorType"},
+								},
+							},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "Monitor",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": envelopeSchema(map[string]any{"$ref": "#/components/schemas/MonitorDefinition"}),
+								},
+							},
+						},
+						"400": map[string]any{"description": "Invalid request"},
+						"401": map[string]any{"description": "Unauthorized"},
+						"503": map[string]any{"description": "Database or detector service unavailable"},
+					},
+				},
+			},
+			"/api/{projectId}/monitors/{monitorId}": map[string]any{
+				"get": map[string]any{
+					"tags":        []string{"monitors"},
+					"summary":     "Get monitor",
+					"operationId": "getMonitor",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{
+							"name":     "projectId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+						{
+							"name":     "monitorId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "Monitor",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": envelopeSchema(map[string]any{"$ref": "#/components/schemas/MonitorDefinition"}),
+								},
+							},
+						},
+						"400": map[string]any{"description": "Invalid request"},
+						"401": map[string]any{"description": "Unauthorized"},
+						"404": map[string]any{"description": "Not found"},
+						"503": map[string]any{"description": "Database unavailable"},
+					},
+				},
+				"put": map[string]any{
+					"tags":        []string{"monitors"},
+					"summary":     "Update monitor",
+					"operationId": "updateMonitor",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{
+							"name":     "projectId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+						{
+							"name":     "monitorId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+					},
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{
+							"application/json": map[string]any{
+								"schema": map[string]any{
+									"type": "object",
+									"properties": map[string]any{
+										"name":         map[string]any{"type": "string"},
+										"detectorType": map[string]any{"type": "string"},
+										"config":       map[string]any{"type": "object", "additionalProperties": true},
+										"intervalSec":  map[string]any{"type": "integer"},
+										"timeoutMs":    map[string]any{"type": "integer"},
+										"enabled":      map[string]any{"type": "boolean"},
+									},
+								},
+							},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "Monitor",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": envelopeSchema(map[string]any{"$ref": "#/components/schemas/MonitorDefinition"}),
+								},
+							},
+						},
+						"400": map[string]any{"description": "Invalid request"},
+						"401": map[string]any{"description": "Unauthorized"},
+						"404": map[string]any{"description": "Not found"},
+						"503": map[string]any{"description": "Database or detector service unavailable"},
+					},
+				},
+				"delete": map[string]any{
+					"tags":        []string{"monitors"},
+					"summary":     "Delete monitor",
+					"operationId": "deleteMonitor",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{
+							"name":     "projectId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+						{
+							"name":     "monitorId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "Deleted",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": envelopeSchema(map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"deleted": map[string]any{"type": "boolean"},
+										},
+										"required": []string{"deleted"},
+									}),
+								},
+							},
+						},
+						"400": map[string]any{"description": "Invalid request"},
+						"401": map[string]any{"description": "Unauthorized"},
+						"404": map[string]any{"description": "Not found"},
+						"503": map[string]any{"description": "Database unavailable"},
+					},
+				},
+			},
+			"/api/{projectId}/monitors/{monitorId}/runs": map[string]any{
+				"get": map[string]any{
+					"tags":        []string{"monitors"},
+					"summary":     "List monitor runs",
+					"operationId": "listMonitorRuns",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{
+							"name":     "projectId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+						{
+							"name":     "monitorId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+						{
+							"name":     "limit",
+							"in":       "query",
+							"required": false,
+							"schema":   map[string]any{"type": "integer"},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "Monitor runs",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": envelopeSchema(map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"items": map[string]any{
+												"type":  "array",
+												"items": map[string]any{"$ref": "#/components/schemas/MonitorRun"},
+											},
+										},
+										"required": []string{"items"},
+									}),
+								},
+							},
+						},
+						"400": map[string]any{"description": "Invalid request"},
+						"401": map[string]any{"description": "Unauthorized"},
+						"503": map[string]any{"description": "Database unavailable"},
+					},
+				},
+			},
+			"/api/{projectId}/monitors/{monitorId}/run": map[string]any{
+				"post": map[string]any{
+					"tags":        []string{"monitors"},
+					"summary":     "Run monitor immediately (enqueue)",
+					"operationId": "runMonitorNow",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{
+							"name":     "projectId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+						{
+							"name":     "monitorId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "Queued",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": envelopeSchema(map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"queued": map[string]any{"type": "boolean"},
+										},
+										"required": []string{"queued"},
+									}),
+								},
+							},
+						},
+						"400": map[string]any{"description": "Invalid request"},
+						"401": map[string]any{"description": "Unauthorized"},
+						"404": map[string]any{"description": "Not found"},
+						"503": map[string]any{"description": "Database unavailable"},
+					},
+				},
+			},
+			"/api/{projectId}/monitors/{monitorId}/test": map[string]any{
+				"post": map[string]any{
+					"tags":        []string{"monitors"},
+					"summary":     "Test monitor synchronously (no notification delivery)",
+					"operationId": "testMonitor",
+					"security":    []map[string]any{{"bearerAuth": []string{}}},
+					"parameters": []map[string]any{
+						{
+							"name":     "projectId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+						{
+							"name":     "monitorId",
+							"in":       "path",
+							"required": true,
+							"schema":   map[string]any{"type": "integer"},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "Test result",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": envelopeSchema(map[string]any{"$ref": "#/components/schemas/MonitorTestResult"}),
+								},
+							},
+						},
+						"400": map[string]any{"description": "Invalid request or detector execution failed"},
+						"401": map[string]any{"description": "Unauthorized"},
+						"404": map[string]any{"description": "Not found"},
+						"503": map[string]any{"description": "Database or detector service unavailable"},
+					},
+				},
+			},
 		},
 		"components": map[string]any{
 			"securitySchemes": map[string]any{
@@ -1697,6 +2095,102 @@ func Spec() map[string]any {
 						},
 					},
 					"required": []string{"name"},
+				},
+				"DetectorDescriptor": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"type": map[string]any{"type": "string"},
+						"mode": map[string]any{
+							"type": "string",
+							"enum": []string{"static", "plugin"},
+						},
+						"path": map[string]any{"type": "string"},
+					},
+					"required": []string{"type", "mode", "path"},
+				},
+				"DetectorSchemaResponse": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"detectorType": map[string]any{"type": "string"},
+						"schema": map[string]any{
+							"type":                 "object",
+							"additionalProperties": true,
+						},
+					},
+					"required": []string{"detectorType", "schema"},
+				},
+				"MonitorDefinition": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":            map[string]any{"type": "integer"},
+						"project_id":    map[string]any{"type": "integer"},
+						"name":          map[string]any{"type": "string"},
+						"detector_type": map[string]any{"type": "string"},
+						"config": map[string]any{
+							"type":                 "object",
+							"additionalProperties": true,
+						},
+						"interval_sec": map[string]any{"type": "integer"},
+						"timeout_ms":   map[string]any{"type": "integer"},
+						"enabled":      map[string]any{"type": "boolean"},
+						"next_run_at":  map[string]any{"type": "string", "format": "date-time"},
+						"lease_owner":  map[string]any{"type": "string"},
+						"lease_until":  map[string]any{"type": "string", "format": "date-time"},
+						"created_at":   map[string]any{"type": "string", "format": "date-time"},
+						"updated_at":   map[string]any{"type": "string", "format": "date-time"},
+					},
+					"required": []string{"id", "project_id", "name", "detector_type", "config", "interval_sec", "timeout_ms", "enabled", "next_run_at", "lease_owner", "created_at", "updated_at"},
+				},
+				"MonitorRun": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":          map[string]any{"type": "integer", "format": "int64"},
+						"monitor_id":  map[string]any{"type": "integer"},
+						"project_id":  map[string]any{"type": "integer"},
+						"started_at":  map[string]any{"type": "string", "format": "date-time"},
+						"finished_at": map[string]any{"type": "string", "format": "date-time"},
+						"status":      map[string]any{"type": "string"},
+						"signal_count": map[string]any{
+							"type": "integer",
+						},
+						"error": map[string]any{"type": "string"},
+						"result": map[string]any{
+							"type":                 "object",
+							"additionalProperties": true,
+						},
+						"created_at": map[string]any{"type": "string", "format": "date-time"},
+					},
+					"required": []string{"id", "monitor_id", "project_id", "started_at", "finished_at", "status", "signal_count", "error", "result", "created_at"},
+				},
+				"MonitorTestSample": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"source":     map[string]any{"type": "string"},
+						"sourceType": map[string]any{"type": "string"},
+						"severity":   map[string]any{"type": "string"},
+						"status":     map[string]any{"type": "string"},
+						"message":    map[string]any{"type": "string"},
+						"labels": map[string]any{
+							"type":                 "object",
+							"additionalProperties": map[string]any{"type": "string"},
+						},
+						"occurredAt": map[string]any{"type": "string", "format": "date-time"},
+					},
+					"required": []string{"source", "sourceType", "severity", "status", "message", "occurredAt"},
+				},
+				"MonitorTestResult": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"monitorId":    map[string]any{"type": "integer"},
+						"detectorType": map[string]any{"type": "string"},
+						"signalCount":  map[string]any{"type": "integer"},
+						"elapsedMs":    map[string]any{"type": "integer"},
+						"samples": map[string]any{
+							"type":  "array",
+							"items": map[string]any{"$ref": "#/components/schemas/MonitorTestSample"},
+						},
+					},
+					"required": []string{"monitorId", "detectorType", "signalCount", "elapsedMs", "samples"},
 				},
 				"AlertContact": map[string]any{
 					"type": "object",

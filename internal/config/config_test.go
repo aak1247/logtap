@@ -32,6 +32,11 @@ func TestFromEnv_DefaultsAndToggles(t *testing.T) {
 	t.Setenv("MAINTENANCE_MODE", "true")
 	t.Setenv("ENABLE_DEBUG_ENDPOINTS", "true")
 	t.Setenv("DB_REQUIRE_TIMESCALE", "true")
+	t.Setenv("DETECTOR_PLUGIN_DIRS", " /opt/a.so ; /opt/plugins ")
+	t.Setenv("RUN_MONITOR_WORKER", "true")
+	t.Setenv("MONITOR_TICK_INTERVAL", "1500ms")
+	t.Setenv("MONITOR_BATCH_SIZE", "30")
+	t.Setenv("MONITOR_LEASE_DURATION", "45s")
 	t.Setenv("CLEANUP_INTERVAL", "bad")
 	t.Setenv("CLEANUP_POLICY_LIMIT", "bad")
 	t.Setenv("CLEANUP_DELETE_BATCH_SIZE", "bad")
@@ -68,6 +73,21 @@ func TestFromEnv_DefaultsAndToggles(t *testing.T) {
 	}
 	if !cfg.DBRequireTimescale {
 		t.Fatalf("expected DBRequireTimescale=true")
+	}
+	if len(cfg.DetectorPluginDirs) != 2 {
+		t.Fatalf("expected 2 detector plugin dirs, got %d", len(cfg.DetectorPluginDirs))
+	}
+	if !cfg.RunMonitorWorker {
+		t.Fatalf("expected RunMonitorWorker=true")
+	}
+	if cfg.MonitorTickInterval != 1500*time.Millisecond {
+		t.Fatalf("expected MonitorTickInterval=1500ms, got %v", cfg.MonitorTickInterval)
+	}
+	if cfg.MonitorBatchSize != 30 {
+		t.Fatalf("expected MonitorBatchSize=30, got %d", cfg.MonitorBatchSize)
+	}
+	if cfg.MonitorLeaseDuration != 45*time.Second {
+		t.Fatalf("expected MonitorLeaseDuration=45s, got %v", cfg.MonitorLeaseDuration)
 	}
 	if cfg.CleanupInterval != 10*time.Minute {
 		t.Fatalf("expected default CleanupInterval, got %v", cfg.CleanupInterval)
@@ -149,6 +169,10 @@ func TestHelpers_ParseAndRedact(t *testing.T) {
 	}
 	if parseDurationDefault("bad", 3*time.Second) != 3*time.Second {
 		t.Fatalf("expected parseDurationDefault fallback for invalid")
+	}
+	dirs := parseStringListEnv(" /a ; /b,/c\t")
+	if len(dirs) != 3 {
+		t.Fatalf("expected 3 dirs, got %d", len(dirs))
 	}
 
 	if _, err := decodeBase64Any(" "); err == nil {

@@ -17,3 +17,6 @@ data/geoip/
 .packages
 .metadata
 build/
+web/playwright-report/
+web/test-results/
+web/.playwright/

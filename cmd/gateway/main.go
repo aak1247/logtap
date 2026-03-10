@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -17,10 +18,13 @@ import (
 	"github.com/aak1247/logtap/internal/config"
 	"github.com/aak1247/logtap/internal/consumer"
 	"github.com/aak1247/logtap/internal/db"
+	"github.com/aak1247/logtap/internal/detector"
+	"github.com/aak1247/logtap/internal/detector/plugins/logbasic"
 	"github.com/aak1247/logtap/internal/enrich"
 	"github.com/aak1247/logtap/internal/httpserver"
 	"github.com/aak1247/logtap/internal/metrics"
 	"github.com/aak1247/logtap/internal/migrate"
+	"github.com/aak1247/logtap/internal/monitor"
 	"github.com/aak1247/logtap/internal/obs"
 	"github.com/aak1247/logtap/internal/queue"
 	"github.com/aak1247/logtap/internal/selflog"
@@ -103,7 +107,38 @@ func main() {
 		defer geoip.Close()
 	}
 
-	srv := httpserver.New(cfg, publisher, gdb, recorder, stats)
+	detectorRegistry := detector.NewRegistry()
+	if err := detectorRegistry.RegisterStatic(logbasic.New()); err != nil {
+		log.Printf("detector register static log_basic: %v", err)
+	}
+	dynamicLoaded := 0
+	dynamicFailed := 0
+	for _, dir := range cfg.DetectorPluginDirs {
+		files, err := detector.PluginFiles(dir)
+		if err != nil {
+			log.Printf("detector plugin dir %q: %v", dir, err)
+			dynamicFailed++
+			continue
+		}
+		for _, path := range files {
+			p, loadErr := detector.LoadPluginFile(path)
+			if loadErr != nil {
+				log.Printf("detector plugin load %q: %v", path, loadErr)
+				dynamicFailed++
+				continue
+			}
+			if regErr := detectorRegistry.RegisterDynamic(filepath.Clean(path), p); regErr != nil {
+				log.Printf("detector plugin register %q: %v", path, regErr)
+				dynamicFailed++
+				continue
+			}
+			dynamicLoaded++
+		}
+	}
+	log.Printf("detector registry initialized: total=%d dynamic_loaded=%d dynamic_failed=%d", len(detectorRegistry.List()), dynamicLoaded, dynamicFailed)
+	detectorService := detector.NewService(detectorRegistry)
+
+	srv := httpserver.New(cfg, publisher, gdb, recorder, stats, detectorService)
 
 	var eventConsumer *consumer.NSQConsumer
 	var logConsumer *consumer.NSQConsumer
@@ -139,6 +174,19 @@ func main() {
 			_ = aw.Run(ctx)
 		}()
 		log.Printf("alert worker enabled")
+	}
+
+	if gdb != nil && cfg.RunMonitorWorker {
+		mw := monitor.NewWorker(gdb, detectorRegistry)
+		mw.TickInterval = cfg.MonitorTickInterval
+		mw.BatchSize = cfg.MonitorBatchSize
+		mw.LeaseDuration = cfg.MonitorLeaseDuration
+		go func() {
+			if err := mw.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("monitor worker: %v", err)
+			}
+		}()
+		log.Printf("monitor worker enabled")
 	}
 
 	errCh := make(chan error, 1)

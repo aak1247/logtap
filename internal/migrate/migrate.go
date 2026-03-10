@@ -43,6 +43,8 @@ func AutoMigrate(ctx context.Context, db *gorm.DB, opts Options) error {
 		&model.AlertRule{},
 		&model.AlertState{},
 		&model.AlertDelivery{},
+		&model.MonitorDefinition{},
+		&model.MonitorRun{},
 	); err != nil {
 		return err
 	}
