@@ -1410,3 +1410,127 @@ func isUniqueViolation(err error) bool {
 		strings.Contains(s, "重复键") ||
 		strings.Contains(s, "唯一约束")
 }
+
+// TestAlertRulesDeliveriesHandler creates real AlertDelivery records based on
+// the same input used for rule preview. It does not update alert state and is
+// intended for manual test deliveries.
+func TestAlertRulesDeliveriesHandler(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if db == nil {
+			respondErr(c, http.StatusNotImplemented, "database not configured")
+			return
+		}
+		pid, err := project.ParseID(c.Param("projectId"))
+		if err != nil {
+			respondErr(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		id64, err := strconv.ParseInt(strings.TrimSpace(c.Param("ruleId")), 10, 32)
+		if err != nil || id64 <= 0 {
+			respondErr(c, http.StatusBadRequest, "invalid ruleId")
+			return
+		}
+		ruleID := int(id64)
+
+		var req struct {
+			Source  string         `json:"source"`
+			Level   string         `json:"level"`
+			Message string         `json:"message"`
+			Fields  map[string]any `json:"fields"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondErr(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		src := strings.ToLower(strings.TrimSpace(req.Source))
+		if src == "" {
+			src = string(alert.SourceBoth)
+		}
+		var source alert.Source
+		switch src {
+		case string(alert.SourceLogs):
+			source = alert.SourceLogs
+		case string(alert.SourceEvents):
+			source = alert.SourceEvents
+		case string(alert.SourceBoth):
+			source = alert.SourceBoth
+		default:
+			respondErr(c, http.StatusBadRequest, "invalid source (expected logs|events|both)")
+			return
+		}
+
+		in := alert.Input{
+			ProjectID: pid,
+			Source:    source,
+			Timestamp: time.Now().UTC(),
+			Level:     strings.TrimSpace(req.Level),
+			Message:   strings.TrimSpace(req.Message),
+			Fields:    req.Fields,
+		}
+		if in.Fields == nil {
+			in.Fields = map[string]any{}
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer cancel()
+
+		eng := alert.NewEngine(db)
+		previews, err := eng.EvaluatePreview(ctx, in)
+		if err != nil {
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+
+		now := time.Now().UTC()
+		deliveries := make([]model.AlertDelivery, 0)
+		for _, p := range previews {
+			if !p.WillEnqueue {
+				continue
+			}
+			if p.RuleID != ruleID {
+				continue
+			}
+			for _, d := range p.Deliveries {
+				deliveries = append(deliveries, model.AlertDelivery{
+					ProjectID:     pid,
+					RuleID:        p.RuleID,
+					ChannelType:   d.ChannelType,
+					Target:        d.Target,
+					Title:         "[TEST] " + d.Title,
+					Content:       d.Content,
+					Status:        "pending",
+					Attempts:      0,
+					NextAttemptAt: now,
+				})
+			}
+		}
+
+		if len(deliveries) == 0 {
+			respondOK(c, gin.H{"created": 0, "items": []any{}})
+			return
+		}
+
+		if err := db.WithContext(ctx).Create(&deliveries).Error; err != nil {
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+
+		items := make([]gin.H, 0, len(deliveries))
+		for _, d := range deliveries {
+			items = append(items, gin.H{
+				"id":          d.ID,
+				"ruleId":      d.RuleID,
+				"channelType": d.ChannelType,
+				"target":      d.Target,
+				"title":       d.Title,
+			})
+		}
+
+		respondOK(c, gin.H{
+			"created": len(deliveries),
+			"items":   items,
+		})
+	}
+}

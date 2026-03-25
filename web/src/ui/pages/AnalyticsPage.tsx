@@ -1,25 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  getActiveSeries,
-  getCleanupPolicy,
-  getDistribution,
-  getFunnel,
-  getRetention,
-  getTopEvents,
-  type ActiveSeriesResponse,
-  type CleanupPolicy,
-  type DistributionResponse,
-  type FunnelResponse,
-  type RetentionResponse,
-  type TopEventsResponse,
+	getActiveSeries,
+	getCleanupPolicy,
+	getDistribution,
+	getFunnel,
+	getRetention,
+	getTopEvents,
+	getUserGrowth,
+	postCustomAnalytics,
+	type ActiveSeriesResponse,
+	type CleanupPolicy,
+	type DistributionResponse,
+	type FunnelResponse,
+	type RetentionResponse,
+	type TopEventsResponse,
+	type UserGrowthResponse,
+	type CustomAnalyticsResponse,
 } from "../../lib/api";
 import { loadSettings } from "../../lib/storage";
 import { clampFunnelDays, loadFunnelDays, saveFunnelDays } from "../../lib/prefs";
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
 import { useNavigate } from "react-router-dom";
+import { EventAnalyticsPanel } from "./analytics/EventAnalyticsPanel";
+import { PropertyAnalyticsPanel } from "./analytics/PropertyAnalyticsPanel";
 
 export function AnalyticsPage() {
+  const [tab, setTab] = useState<"basic" | "event" | "property">("basic");
   const settings = useMemo(() => loadSettings(), []);
   const nav = useNavigate();
   const [dau, setDau] = useState<ActiveSeriesResponse | null>(null);
@@ -34,6 +41,7 @@ export function AnalyticsPage() {
   const [retention, setRetention] = useState<RetentionResponse | null>(null);
   const [topEvents, setTopEvents] = useState<TopEventsResponse | null>(null);
   const [cleanupPolicy, setCleanupPolicy] = useState<CleanupPolicy | null>(null);
+  const [userGrowth, setUserGrowth] = useState<UserGrowthResponse | null>(null);
   const [funnelStepsText, setFunnelStepsText] = useState("signup,checkout,paid");
   const [funnelWithin, setFunnelWithin] = useState("24h");
   const [funnelDays, setFunnelDays] = useState(() => loadFunnelDays());
@@ -55,7 +63,7 @@ export function AnalyticsPage() {
       try {
         if (!settings.token || !settings.projectId) return;
         setErr("");
-        const [d, m, os, country, op, ret, top, cp] = await Promise.all([
+        const [d, m, os, country, op, ret, top, cp, ug] = await Promise.all([
           getActiveSeries(settings, { bucket: "day" }),
           getActiveSeries(settings, { bucket: "month" }),
           getDistribution(settings, { dim: "os", limit: 10 }),
@@ -64,6 +72,7 @@ export function AnalyticsPage() {
           getRetention(settings),
           getTopEvents(settings, { limit: 20 }),
           getCleanupPolicy(settings).catch(() => null),
+          getUserGrowth(settings).catch(() => null),
         ]);
         if (cancelled) return;
         setDau(d);
@@ -74,6 +83,7 @@ export function AnalyticsPage() {
         setRetention(ret);
         setTopEvents(top);
         setCleanupPolicy(cp);
+        setUserGrowth(ug);
       } catch (e) {
         if (cancelled) return;
         setErr(e instanceof Error ? e.message : String(e));
@@ -85,19 +95,184 @@ export function AnalyticsPage() {
   }, [settings.apiBase, settings.projectId]);
 
   return (
-    <div className="space-y-4">
-      <div>
-        <div className="text-lg font-semibold">分析</div>
-        <div className="mt-1 text-sm text-zinc-400">
-          去重口径：优先 user.id，否则 device_id
+    <div className="flex gap-4">
+      <aside className="w-40 shrink-0 border-r border-zinc-900 pr-4">
+        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          分析
         </div>
-      </div>
+        <nav className="mt-3 space-y-1 text-sm">
+          <button
+            type="button"
+            className={
+              "w-full rounded-md px-2 py-1 text-left " +
+              (tab === "basic"
+                ? "bg-zinc-800 text-zinc-50"
+                : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100")
+            }
+            onClick={() => setTab("basic")}
+          >
+            基础分析
+          </button>
+          <button
+            type="button"
+            className={
+              "w-full rounded-md px-2 py-1 text-left " +
+              (tab === "event"
+                ? "bg-zinc-800 text-zinc-50"
+                : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100")
+            }
+            onClick={() => setTab("event")}
+          >
+            事件分析
+          </button>
+          <button
+            type="button"
+            className={
+              "w-full rounded-md px-2 py-1 text-left " +
+              (tab === "property"
+                ? "bg-zinc-800 text-zinc-50"
+                : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100")
+            }
+            onClick={() => setTab("property")}
+          >
+            属性分析
+          </button>
+        </nav>
+      </aside>
+      <main className="flex-1 space-y-4">
+        <div>
+          <div className="text-lg font-semibold">分析</div>
+          <div className="mt-1 text-sm text-zinc-400">
+            去重口径：优先 user.id，否则 device_id
+          </div>
+        </div>
 
-      {err ? (
-        <div className="rounded-xl border border-red-900/60 bg-red-950/40 p-4 text-sm text-red-200">
-          {err}
-        </div>
-      ) : null}
+        {err ? (
+          <div className="rounded-xl border border-red-900/60 bg-red-950/40 p-4 text-sm text-red-200">
+            {err}
+          </div>
+        ) : null}
+
+        {tab === "basic" ? (
+          <BasicAnalyticsPanel
+            dau={dau}
+            mau={mau}
+            osDist={osDist}
+            countryDist={countryDist}
+            operatorDist={operatorDist}
+            retention={retention}
+            topEvents={topEvents}
+            cleanupPolicy={cleanupPolicy}
+            userGrowth={userGrowth}
+            funnelStepsText={funnelStepsText}
+            setFunnelStepsText={setFunnelStepsText}
+            funnelWithin={funnelWithin}
+            setFunnelWithin={setFunnelWithin}
+            funnelDays={funnelDays}
+            setFunnelDays={setFunnelDays}
+            funnel={funnel}
+            setFunnel={setFunnel}
+            funnelBusy={funnelBusy}
+            setFunnelBusy={setFunnelBusy}
+            settings={settings}
+            setErr={setErr}
+          />
+        ) : null}
+
+        {tab === "event" ? (
+          <EventAnalyticsPanel settings={settings} />
+        ) : null}
+
+        {tab === "property" ? (
+          <PropertyAnalyticsPanel settings={settings} />
+        ) : null}
+      </main>
+    </div>
+  );
+}
+
+type BasicAnalyticsProps = {
+  dau: ActiveSeriesResponse | null;
+  mau: ActiveSeriesResponse | null;
+  osDist: DistributionResponse | null;
+  countryDist: DistributionResponse | null;
+  operatorDist: DistributionResponse | null;
+  retention: RetentionResponse | null;
+  topEvents: TopEventsResponse | null;
+  cleanupPolicy: CleanupPolicy | null;
+  userGrowth: UserGrowthResponse | null;
+  funnelStepsText: string;
+  setFunnelStepsText: (v: string) => void;
+  funnelWithin: string;
+  setFunnelWithin: (v: string) => void;
+  funnelDays: number;
+  setFunnelDays: (v: number) => void;
+  funnel: FunnelResponse | null;
+  setFunnel: (v: FunnelResponse | null) => void;
+  funnelBusy: boolean;
+  setFunnelBusy: (v: boolean) => void;
+  settings: ReturnType<typeof loadSettings>;
+  setErr: (msg: string) => void;
+};
+
+function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
+  const {
+    dau,
+    mau,
+    osDist,
+    countryDist,
+    operatorDist,
+    retention,
+    topEvents,
+    cleanupPolicy,
+    userGrowth,
+    funnelStepsText,
+    setFunnelStepsText,
+    funnelWithin,
+    setFunnelWithin,
+    funnelDays,
+    setFunnelDays,
+    funnel,
+    setFunnel,
+    funnelBusy,
+    setFunnelBusy,
+    settings,
+    setErr,
+  } = props;
+
+  return (
+    <>
+      <Panel title="用户增长（近 180 天，新用户 + 累计）">
+        {userGrowth ? (
+          (() => {
+            const series = userGrowth.series ?? [];
+            if (series.length === 0) {
+              return <div className="text-sm text-zinc-500">暂无数据</div>;
+            }
+            let cumulative = 0;
+            const cumulativeValues = series.map((p) => {
+              cumulative += p.new_users;
+              return cumulative;
+            });
+            const lastDay = series[series.length - 1]?.day;
+            const lastTotal = cumulativeValues[cumulativeValues.length - 1] ?? userGrowth.total_users ?? 0;
+            return (
+              <div className="space-y-3">
+                <div className="flex items-end justify-between">
+                  <div className="text-2xl font-semibold">{lastTotal}</div>
+                  <div className="text-xs text-zinc-500">{lastDay}</div>
+                </div>
+                <Sparkline values={cumulativeValues} />
+                <div className="text-xs text-zinc-500">
+                  时间范围：{userGrowth.start.slice(0, 10)} ~ {userGrowth.end.slice(0, 10)}
+                </div>
+              </div>
+            );
+          })()
+        ) : (
+          <div className="text-sm text-zinc-500">加载中...</div>
+        )}
+      </Panel>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Panel title="DAU（近 14 天）">
@@ -269,7 +444,7 @@ export function AnalyticsPage() {
           </div>
         </Panel>
       </div>
-    </div>
+    </>
   );
 }
 

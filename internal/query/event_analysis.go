@@ -629,3 +629,136 @@ func parseCSVSteps(raw string, maxN int) []string {
 	}
 	return out
 }
+
+type UserGrowthPoint struct {
+	Day      string `json:"day"`
+	NewUsers int64  `json:"new_users"`
+}
+
+// GET /api/:projectId/analytics/users?start=RFC3339&end=RFC3339
+// New users are defined as distinct_ids whose first event/log occurred within the
+// specified time range. Cumulative users can be derived on the frontend by
+// prefix-summing the new_users series.
+func UserGrowthHandler(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if db == nil {
+			respondErr(c, http.StatusNotImplemented, "database not configured")
+			return
+		}
+		projectID, err := project.ParseID(c.Param("projectId"))
+		if err != nil {
+			respondErr(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		now := time.Now().UTC()
+		start, okStart := parseTime(c.Query("start"))
+		end, okEnd := parseTime(c.Query("end"))
+		if !okEnd {
+			end = now
+		}
+		if !okStart {
+			// 默认展示近 180 天的新用户趋势
+			start = end.AddDate(0, 0, -179)
+		}
+		if end.Before(start) {
+			start, end = end, start
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+		defer cancel()
+
+		points, totalUsers, err := userGrowthFromDB(ctx, db, projectID, start, end)
+		if err != nil {
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+
+		respondOK(c, gin.H{
+			"project_id":  projectID,
+			"start":       start.UTC().Format(time.RFC3339),
+			"end":         end.UTC().Format(time.RFC3339),
+			"series":      points,
+			"total_users": totalUsers,
+		})
+	}
+}
+
+type userGrowthRow struct {
+	Day      string `gorm:"column:day"`
+	NewUsers int64  `gorm:"column:new_users"`
+}
+
+func userGrowthFromDB(ctx context.Context, db *gorm.DB, projectID int, start, end time.Time) ([]UserGrowthPoint, int64, error) {
+	if db == nil {
+		return nil, 0, gorm.ErrInvalidDB
+	}
+	if projectID <= 0 {
+		return nil, 0, gorm.ErrInvalidData
+	}
+
+	start = start.UTC()
+	end = end.UTC()
+	if end.Before(start) {
+		start, end = end, start
+	}
+
+	hasLogs := db.Migrator().HasTable("logs")
+	hasTrackEvents := db.Migrator().HasTable("track_events")
+	if !hasLogs && !hasTrackEvents {
+		return nil, 0, fmt.Errorf("logs/track_events unavailable")
+	}
+
+	var b strings.Builder
+	var args []any
+
+	b.WriteString("WITH all_events AS (")
+	first := true
+	if hasLogs {
+		b.WriteString("SELECT project_id, distinct_id, timestamp FROM logs WHERE project_id = ? AND distinct_id IS NOT NULL AND distinct_id <> ''")
+		args = append(args, projectID)
+		first = false
+	}
+	if hasTrackEvents {
+		if !first {
+			b.WriteString(" UNION ALL ")
+		}
+		b.WriteString("SELECT project_id, distinct_id, timestamp FROM track_events WHERE project_id = ? AND distinct_id IS NOT NULL AND distinct_id <> ''")
+		args = append(args, projectID)
+	}
+	b.WriteString("), first_seen AS (")
+	b.WriteString(" SELECT distinct_id, MIN(timestamp) AS first_ts FROM all_events GROUP BY distinct_id")
+	b.WriteString(")")
+
+	baseSQL := b.String()
+
+	// Per-day new users within [start, end].
+	seriesSQL := baseSQL + " SELECT DATE(first_ts) AS day, COUNT(*) AS new_users" +
+		" FROM first_seen" +
+		" WHERE first_ts >= ? AND first_ts <= ?" +
+		" GROUP BY DATE(first_ts)" +
+		" ORDER BY DATE(first_ts)"
+	seriesArgs := append(append([]any{}, args...), start, end)
+
+	var rows []userGrowthRow
+	if err := db.WithContext(ctx).Raw(seriesSQL, seriesArgs...).Scan(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// Total users across all time.
+	totalSQL := baseSQL + " SELECT COUNT(*) AS total_users FROM first_seen"
+	var totalUsers int64
+	if err := db.WithContext(ctx).Raw(totalSQL, args...).Scan(&totalUsers).Error; err != nil {
+		return nil, 0, err
+	}
+
+	points := make([]UserGrowthPoint, 0, len(rows))
+	for _, r := range rows {
+		if strings.TrimSpace(r.Day) == "" {
+			continue
+		}
+		points = append(points, UserGrowthPoint{Day: r.Day, NewUsers: r.NewUsers})
+	}
+
+	return points, totalUsers, nil
+}

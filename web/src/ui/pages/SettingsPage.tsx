@@ -21,6 +21,8 @@ import {
   saveSettings,
 } from "../../lib/storage";
 import { Panel } from "../components/Panel";
+import type { ApiSettings, EventDefinition, PropertyDefinition } from "../../lib/api";
+import { listEventDefinitions, createEventDefinition, updateEventDefinition, listPropertyDefinitions, createPropertyDefinition, updatePropertyDefinition } from "../../lib/api";
 
 export function SettingsPage() {
   const nav = useNavigate();
@@ -602,9 +604,357 @@ export function SettingsPage() {
           </div>
         </div>
       </Panel>
+
+      <Panel title="事件定义（行为管理）">
+        <EventSchemaPanel settings={settings} />
+      </Panel>
+
+      <Panel title="属性定义（事件属性／用户属性）">
+        <PropertySchemaPanel settings={settings} />
+      </Panel>
     </div>
   );
 }
+
+
+function EventSchemaPanel(props: { settings: ApiSettings }) {
+  const { settings } = props;
+  const [items, setItems] = useState<EventDefinition[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [name, setName] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [category, setCategory] = useState("");
+  const [description, setDescription] = useState("");
+  const [owner, setOwner] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!settings.token || !settings.projectId) return;
+        setErr("");
+        const res = await listEventDefinitions(settings, { status: "active" });
+        if (!cancelled) setItems(res.items ?? []);
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.apiBase, settings.projectId, settings.token]);
+
+  const handleCreate = async () => {
+    if (!settings.token || !settings.projectId) return;
+    const n = name.trim();
+    if (!n) {
+      setErr("事件 name 不能为空");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    try {
+      const row = await createEventDefinition(settings, {
+        name: n,
+        display_name: displayName.trim() || undefined,
+        category: category.trim() || undefined,
+        description: description.trim() || undefined,
+        owner: owner.trim() || undefined,
+      });
+      setItems((prev) => (prev ? [...prev, row] : [row]));
+      setName("");
+      setDisplayName("");
+      setCategory("");
+      setDescription("");
+      setOwner("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {err ? (
+        <div className="rounded-md border border-red-900/60 bg-red-950/40 p-2 text-xs text-red-200">
+          {err}
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <Field label="name（事件标识，英文）" value={name} onChange={setName} placeholder="signup" />
+        <Field label="显示名" value={displayName} onChange={setDisplayName} placeholder="用户注册" />
+        <Field label="分类（可选）" value={category} onChange={setCategory} placeholder="auth" />
+        <Field label="Owner（可选）" value={owner} onChange={setOwner} placeholder="产品/负责人" />
+      </div>
+      <div>
+        <div className="text-xs text-zinc-400">描述（可选）</div>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="补充事件语义、触发条件等说明"
+          className="mt-1 w-full resize-y rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+          rows={2}
+        />
+      </div>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          className="btn btn-sm btn-primary"
+          onClick={handleCreate}
+          disabled={busy}
+        >
+          {busy ? "保存中..." : "新增事件定义"}
+        </button>
+      </div>
+
+      <div className="mt-2 overflow-x-auto text-sm">
+        {items === null ? (
+          <div className="text-zinc-500">加载中...</div>
+        ) : items.length === 0 ? (
+          <div className="text-zinc-500">暂无事件定义，可以先根据常见埋点补充。</div>
+        ) : (
+          <table className="w-full text-left text-xs">
+            <thead className="text-zinc-500">
+              <tr>
+                <th className="py-2 pr-4">name</th>
+                <th className="py-2 pr-4">显示名</th>
+                <th className="py-2 pr-4">分类</th>
+                <th className="py-2 pr-4">Owner</th>
+                <th className="py-2 pr-4">状态</th>
+                <th className="py-2 pr-4">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-900">
+              {items.map((it) => (
+                <tr key={it.id} className="hover:bg-zinc-900/40">
+                  <td className="py-2 pr-4 font-mono text-xs text-zinc-300">{it.name}</td>
+                  <td className="py-2 pr-4 text-zinc-100">{it.display_name || it.name}</td>
+                  <td className="py-2 pr-4 text-xs text-zinc-400">{it.category}</td>
+                  <td className="py-2 pr-4 text-xs text-zinc-400">{it.owner}</td>
+                  <td className="py-2 pr-4 text-xs text-zinc-400">{it.status}</td>
+                  <td className="py-2 pr-4 text-right">
+                    <button
+                      type="button"
+                      className="btn btn-xs btn-outline"
+                      disabled={busy}
+                      onClick={async () => {
+                        try {
+                          const nextStatus = it.status === "active" ? "inactive" : "active";
+                          setBusy(true);
+                          setErr("");
+                          const updated = await updateEventDefinition(settings, it.name, {
+                            status: nextStatus,
+                          });
+                          setItems((prev) =>
+                            prev ? prev.map((row) => (row.id === updated.id ? updated : row)) : [updated],
+                          );
+                        } catch (e) {
+                          setErr(e instanceof Error ? e.message : String(e));
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      {it.status === "active" ? "停用" : "启用"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PropertySchemaPanel(props: { settings: ApiSettings }) {
+  const { settings } = props;
+  const [items, setItems] = useState<PropertyDefinition[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const [keyName, setKeyName] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [type, setType] = useState<"string" | "enum" | "number">("string");
+  const [description, setDescription] = useState("");
+  const [enumValues, setEnumValues] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!settings.token || !settings.projectId) return;
+        setErr("");
+        const res = await listPropertyDefinitions(settings, { status: "active" });
+        if (!cancelled) setItems(res.items ?? []);
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.apiBase, settings.projectId, settings.token]);
+
+  const handleCreate = async () => {
+    if (!settings.token || !settings.projectId) return;
+    const k = keyName.trim();
+    if (!k) {
+      setErr("属性 key 不能为空");
+      return;
+    }
+    if (type === "enum" && !enumValues.trim()) {
+      setErr("枚举属性需要至少一个枚举值");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    try {
+      const enums = enumValues
+        .split(/[\s,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const row = await createPropertyDefinition(settings, {
+        key: k,
+        display_name: displayName.trim() || undefined,
+        type,
+        description: description.trim() || undefined,
+        enum_values: enums.length > 0 ? enums : undefined,
+      });
+      setItems((prev) => (prev ? [...prev, row] : [row]));
+      setKeyName("");
+      setDisplayName("");
+      setDescription("");
+      setEnumValues("");
+      setType("string");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {err ? (
+        <div className="rounded-md border border-red-900/60 bg-red-950/40 p-2 text-xs text-red-200">
+          {err}
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <Field label="key（属性标识，英文）" value={keyName} onChange={setKeyName} placeholder="plan" />
+        <Field label="显示名" value={displayName} onChange={setDisplayName} placeholder="套餐" />
+        <div>
+          <div className="text-xs text-zinc-400">类型</div>
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value as "string" | "enum" | "number")}
+            className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+          >
+            <option value="string">string</option>
+            <option value="enum">enum</option>
+            <option value="number">number</option>
+          </select>
+        </div>
+        {type === "enum" ? (
+          <div>
+            <div className="text-xs text-zinc-400">枚举值（逗号或空格分隔）</div>
+            <input
+              value={enumValues}
+              onChange={(e) => setEnumValues(e.target.value)}
+              placeholder="free pro enterprise"
+              className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+            />
+          </div>
+        ) : (
+          <div className="text-xs text-zinc-500">&nbsp;</div>
+        )}
+      </div>
+      <div>
+        <div className="text-xs text-zinc-400">描述（可选）</div>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="说明该属性的含义、取值范围等"
+          className="mt-1 w-full resize-y rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+          rows={2}
+        />
+      </div>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          className="btn btn-sm btn-primary"
+          onClick={handleCreate}
+          disabled={busy}
+        >
+          {busy ? "保存中..." : "新增属性定义"}
+        </button>
+      </div>
+
+      <div className="mt-2 overflow-x-auto text-sm">
+        {items === null ? (
+          <div className="text-zinc-500">加载中...</div>
+        ) : items.length === 0 ? (
+          <div className="text-zinc-500">暂无属性定义，可以先根据埋点字段补充。</div>
+        ) : (
+          <table className="w-full text-left text-xs">
+            <thead className="text-zinc-500">
+              <tr>
+                <th className="py-2 pr-4">key</th>
+                <th className="py-2 pr-4">显示名</th>
+                <th className="py-2 pr-4">类型</th>
+                <th className="py-2 pr-4">状态</th>
+                <th className="py-2 pr-4">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-900">
+              {items.map((it) => (
+                <tr key={it.id} className="hover:bg-zinc-900/40">
+                  <td className="py-2 pr-4 font-mono text-xs text-zinc-300">{it.key}</td>
+                  <td className="py-2 pr-4 text-zinc-100">{it.display_name || it.key}</td>
+                  <td className="py-2 pr-4 text-xs text-zinc-400">{it.type}</td>
+                  <td className="py-2 pr-4 text-xs text-zinc-400">{it.status}</td>
+                  <td className="py-2 pr-4 text-right">
+                    <button
+                      type="button"
+                      className="btn btn-xs btn-outline"
+                      disabled={busy}
+                      onClick={async () => {
+                        try {
+                          const nextStatus = it.status === "active" ? "inactive" : "active";
+                          setBusy(true);
+                          setErr("");
+                          const updated = await updatePropertyDefinition(settings, it.key, {
+                            status: nextStatus,
+                          });
+                          setItems((prev) =>
+                            prev ? prev.map((row) => (row.id === updated.id ? updated : row)) : [updated],
+                          );
+                        } catch (e) {
+                          setErr(e instanceof Error ? e.message : String(e));
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      {it.status === "active" ? "停用" : "启用"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 function CodeBlock(props: { title: string; text: string }) {
   return (

@@ -118,6 +118,9 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 		if db != nil {
 			queryAPI.GET("/events/recent", query.RecentEventsHandler(db))
 			queryAPI.GET("/events/:eventId", query.GetEventHandler(db))
+			queryAPI.GET("/events/schema", query.ListEventDefinitionsHandler(db))
+			queryAPI.POST("/events/schema", query.CreateEventDefinitionHandler(db))
+			queryAPI.PUT("/events/schema/:eventName", query.UpdateEventDefinitionHandler(db))
 			queryAPI.GET("/logs/search", query.SearchLogsHandler(db))
 			queryAPI.DELETE("/logs/cleanup", query.CleanupLogsHandler(db))
 			queryAPI.DELETE("/events/cleanup", query.CleanupEventsHandler(db))
@@ -126,7 +129,13 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 			queryAPI.PUT("/cleanup/policy", query.UpsertCleanupPolicyHandler(db))
 			queryAPI.POST("/cleanup/run", query.RunCleanupPolicyHandler(db))
 			queryAPI.GET("/analytics/events/top", query.TopEventsHandler(db))
+			queryAPI.GET("/analytics/users", query.UserGrowthHandler(db))
 			queryAPI.GET("/analytics/funnel", query.FunnelHandler(db))
+			queryAPI.POST("/analytics/custom", query.CustomAnalyticsHandler(db))
+			queryAPI.GET("/analytics/views", query.ListAnalysisViewsHandler(db))
+			queryAPI.POST("/analytics/views", query.CreateAnalysisViewHandler(db))
+			queryAPI.GET("/analytics/views/:viewId", query.GetAnalysisViewHandler(db))
+			queryAPI.DELETE("/analytics/views/:viewId", query.DeleteAnalysisViewHandler(db))
 
 			alerts := queryAPI.Group("/alerts")
 			{
@@ -153,6 +162,7 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 				alerts.GET("/rules", query.ListAlertRulesHandler(db))
 				alerts.POST("/rules", query.CreateAlertRuleHandler(db))
 				alerts.POST("/rules/test", query.TestAlertRulesHandler(db))
+				alerts.POST("/rules/:ruleId/test-deliveries", query.TestAlertRulesDeliveriesHandler(db))
 				alerts.PUT("/rules/:ruleId", query.UpdateAlertRuleHandler(db))
 				alerts.DELETE("/rules/:ruleId", query.DeleteAlertRuleHandler(db))
 
@@ -176,6 +186,9 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 		queryAPI.GET("/analytics/active", query.ActiveSeriesHandler(recorder))
 		queryAPI.GET("/analytics/dist", query.DistributionHandler(recorder))
 		queryAPI.GET("/analytics/retention", query.RetentionHandler(recorder))
+		queryAPI.GET("/properties/schema", query.ListPropertyDefinitionsHandler(db))
+		queryAPI.POST("/properties/schema", query.CreatePropertyDefinitionHandler(db))
+		queryAPI.PUT("/properties/schema/:propertyKey", query.UpdatePropertyDefinitionHandler(db))
 	}
 
 	return &http.Server{

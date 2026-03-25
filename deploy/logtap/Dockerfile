@@ -17,6 +17,8 @@ ENV GOPROXY=https://goproxy.cn,https://goproxy.io,direct \
     GO111MODULE=on
 COPY go.mod go.sum ./
 RUN go mod download
+# Ensure geoip directory exists in the build context even if databases are missing
+RUN mkdir -p data/geoip
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/gateway ./cmd/gateway
 
@@ -27,9 +29,17 @@ ARG MAXMIND_LICENSE_KEY=""
 ARG MAXMIND_CITY_EDITION_ID="GeoLite2-City"
 ARG MAXMIND_ASN_EDITION_ID="GeoLite2-ASN"
 WORKDIR /out
+
+# Prefer locally-downloaded GeoIP databases from the build context; fall back to
+# downloading from MaxMind when they are not available.
+COPY --from=go-build /src/data/geoip/ /local-geoip/
+
 RUN set -eux; \
     mkdir -p /out; \
-    if [ -n "${MAXMIND_LICENSE_KEY}" ]; then \
+    if [ -f /local-geoip/GeoLite2-City.mmdb ] && [ -f /local-geoip/GeoLite2-ASN.mmdb ]; then \
+      cp /local-geoip/GeoLite2-City.mmdb /out/GeoLite2-City.mmdb; \
+      cp /local-geoip/GeoLite2-ASN.mmdb /out/GeoLite2-ASN.mmdb; \
+    elif [ -n "${MAXMIND_LICENSE_KEY}" ]; then \
       curl -fsSL "https://download.maxmind.com/app/geoip_download?edition_id=${MAXMIND_CITY_EDITION_ID}&license_key=${MAXMIND_LICENSE_KEY}&suffix=tar.gz" -o city.tar.gz; \
       mmdb_path="$(tar -tzf city.tar.gz | awk '/\\.mmdb$/ {print; exit}')"; \
       tar -xzf city.tar.gz -C /out "${mmdb_path}"; \
@@ -42,6 +52,8 @@ RUN set -eux; \
       rm -f asn.tar.gz; \
       mv "/out/${mmdb_path}" /out/GeoLite2-ASN.mmdb; \
       rm -rf "/out/$(echo "${mmdb_path}" | cut -d/ -f1)" 2>/dev/null || true; \
+    else \
+      echo "No local GeoIP mmdb found and MAXMIND_LICENSE_KEY not provided; skipping GeoIP download."; \
     fi
 
 # Final stage with nginx + supervisord
@@ -64,7 +76,7 @@ COPY deploy/logtap/supervisord.conf /etc/supervisor.d/supervisord.conf
 # Copy Go binary
 COPY --from=go-build /out/gateway /gateway
 
-# Optional: GeoIP databases (present only when MAXMIND_LICENSE_KEY was provided at build)
+# Optional: GeoIP databases (present when either local files exist or MAXMIND_LICENSE_KEY was provided at build)
 COPY --from=geoip /out/ /data/geoip/
 
 # Startup script: optional runtime GeoIP download + env defaults

@@ -116,3 +116,57 @@ type CleanupPolicy struct {
 }
 
 func (CleanupPolicy) TableName() string { return "cleanup_policies" }
+
+// EventDefinition stores per-project metadata for named events (behavior categories).
+// It is used by the Analytics UI to present friendly names and descriptions for
+// event-based analyses, but does not affect ingest.
+type EventDefinition struct {
+	ID          int       `gorm:"primaryKey;autoIncrement;column:id"`
+	ProjectID   int       `gorm:"not null;index;uniqueIndex:idx_event_definitions_project_name,priority:1;column:project_id"`
+	Name        string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_event_definitions_project_name,priority:2;column:name"`
+	DisplayName string    `gorm:"type:varchar(255);not null;default:'';column:display_name"`
+	Category    string    `gorm:"type:varchar(100);not null;default:'';column:category"`
+	Description string    `gorm:"type:text;column:description"`
+	Status      string    `gorm:"type:varchar(32);not null;default:'active';column:status"`
+	Owner       string    `gorm:"type:varchar(255);not null;default:'';column:owner"`
+	CreatedAt   time.Time `gorm:"not null;autoCreateTime;column:created_at"`
+	UpdatedAt   time.Time `gorm:"not null;autoUpdateTime;column:updated_at"`
+}
+
+func (EventDefinition) TableName() string { return "event_definitions" }
+
+// PropertyDefinition stores per-project definitions for event/log properties
+// (dimensions) that can be used in analytics. The actual values continue to
+// live in logs.fields/track properties; this table only carries schema
+// metadata such as type and enum candidates.
+type PropertyDefinition struct {
+	ID           int            `gorm:"primaryKey;autoIncrement;column:id"`
+	ProjectID    int            `gorm:"not null;index;uniqueIndex:idx_property_definitions_project_key,priority:1;column:project_id"`
+	Key          string         `gorm:"type:varchar(255);not null;uniqueIndex:idx_property_definitions_project_key,priority:2;column:key"`
+	DisplayName  string         `gorm:"type:varchar(255);not null;default:'';column:display_name"`
+	Type         string         `gorm:"type:varchar(32);not null;default:'string';column:type"`
+	Description  string         `gorm:"type:text;column:description"`
+	Status       string         `gorm:"type:varchar(32);not null;default:'active';column:status"`
+	EnumValues   datatypes.JSON `gorm:"type:jsonb;column:enum_values"`
+	ExampleValues datatypes.JSON `gorm:"type:jsonb;column:example_values"`
+	CreatedAt    time.Time      `gorm:"not null;autoCreateTime;column:created_at"`
+	UpdatedAt    time.Time      `gorm:"not null;autoUpdateTime;column:updated_at"`
+}
+
+func (PropertyDefinition) TableName() string { return "property_definitions" }
+
+// AnalysisView stores saved analytics configurations (event/property analyses)
+// so that users can quickly reopen commonly used reports.
+type AnalysisView struct {
+	ID           int            `gorm:"primaryKey;autoIncrement;column:id"`
+	ProjectID    int            `gorm:"not null;index;column:project_id"`
+	Name         string         `gorm:"type:varchar(255);not null;column:name"`
+	Description  string         `gorm:"type:text;column:description"`
+	AnalysisType string         `gorm:"type:varchar(32);not null;column:analysis_type"`
+	Query        datatypes.JSON `gorm:"type:jsonb;not null;column:query"`
+	OwnerUserID  int64          `gorm:"not null;default:0;column:owner_user_id"`
+	CreatedAt    time.Time      `gorm:"not null;autoCreateTime;column:created_at"`
+	UpdatedAt    time.Time      `gorm:"not null;autoUpdateTime;column:updated_at"`
+}
+
+func (AnalysisView) TableName() string { return "analysis_views" }

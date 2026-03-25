@@ -169,6 +169,33 @@ export type AlertDeliveryPreview = {
   content: string;
 };
 
+export type EventDefinition = {
+  id: number;
+  project_id: number;
+  name: string;
+  display_name: string;
+  category: string;
+  description: string;
+  status: string;
+  owner: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PropertyDefinition = {
+  id: number;
+  project_id: number;
+  key: string;
+  display_name: string;
+  type: "string" | "enum" | "number" | string;
+  description: string;
+  status: string;
+  enum_values?: string[] | null;
+  example_values?: string[] | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AlertRulePreview = {
   ruleId: number;
   ruleName: string;
@@ -328,12 +355,218 @@ export type FunnelResponse = {
   steps: FunnelStep[];
 };
 
+export type UserGrowthPoint = { day: string; new_users: number };
+export type UserGrowthResponse = {
+  project_id: number;
+  start: string;
+  end: string;
+  series: UserGrowthPoint[];
+  total_users: number;
+};
+
+export type CustomAnalyticsSeriesPoint = { time: string; value: number };
+export type CustomAnalyticsSeries = {
+  name: string;
+  dimensions: Record<string, string>;
+  points: CustomAnalyticsSeriesPoint[];
+  total: number;
+};
+export type CustomAnalyticsResponse = {
+  project_id: number;
+  analysis_type: string;
+  metric: string;
+  granularity: string;
+  start: string;
+  end: string;
+  group_by: string[];
+  property_key?: string;
+  series: CustomAnalyticsSeries[];
+};
+
+export type AnalysisView = {
+  id: number;
+  project_id: number;
+  name: string;
+  description: string;
+  analysis_type: string;
+  query: unknown;
+  owner_user_id: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function listAnalysisViews(
+  s: ApiSettings,
+  params?: { analysis_type?: string },
+): Promise<{ items: AnalysisView[] }> {
+  const usp = new URLSearchParams();
+  if (params?.analysis_type) usp.set("analysis_type", params.analysis_type);
+  const qs = usp.toString();
+  const path = `${s.apiBase}/api/${s.projectId}/analytics/views${qs ? `?${qs}` : ""}`;
+  return fetchJSON(path, s.token);
+}
+
+export async function createAnalysisView(
+  s: ApiSettings,
+  req: { name: string; description?: string; analysis_type: string; query: unknown },
+): Promise<AnalysisView> {
+  return fetchJSON(`${s.apiBase}/api/${s.projectId}/analytics/views`, s.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function getAnalysisView(
+  s: ApiSettings,
+  viewId: number,
+): Promise<AnalysisView> {
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/analytics/views/${viewId}`,
+    s.token,
+  );
+}
+
+export async function deleteAnalysisView(
+  s: ApiSettings,
+  viewId: number,
+): Promise<{ deleted: boolean }> {
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/analytics/views/${viewId}`,
+    s.token,
+    { method: "DELETE" },
+  );
+}
+
+export async function listEventDefinitions(
+  s: ApiSettings,
+  params?: { status?: string; q?: string },
+): Promise<{ items: EventDefinition[] }> {
+  const usp = new URLSearchParams();
+  if (params?.status) usp.set("status", params.status);
+  if (params?.q) usp.set("q", params.q);
+  const qs = usp.toString();
+  const path = `${s.apiBase}/api/${s.projectId}/events/schema${qs ? `?${qs}` : ""}`;
+  return fetchJSON(path, s.token);
+}
+
+export async function createEventDefinition(
+  s: ApiSettings,
+  req: {
+    name: string;
+    display_name?: string;
+    category?: string;
+    description?: string;
+    status?: string;
+    owner?: string;
+  },
+): Promise<EventDefinition> {
+  return fetchJSON(`${s.apiBase}/api/${s.projectId}/events/schema`, s.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function updateEventDefinition(
+  s: ApiSettings,
+  name: string,
+  req: {
+    display_name?: string;
+    category?: string;
+    description?: string;
+    status?: string;
+    owner?: string;
+  },
+): Promise<EventDefinition> {
+  const safeName = encodeURIComponent(name);
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/events/schema/${safeName}`,
+    s.token,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    },
+  );
+}
+
+export async function listPropertyDefinitions(
+  s: ApiSettings,
+  params?: { status?: string; type?: string; q?: string },
+): Promise<{ items: PropertyDefinition[] }> {
+  const usp = new URLSearchParams();
+  if (params?.status) usp.set("status", params.status);
+  if (params?.type) usp.set("type", params.type);
+  if (params?.q) usp.set("q", params.q);
+  const qs = usp.toString();
+  const path = `${s.apiBase}/api/${s.projectId}/properties/schema${qs ? `?${qs}` : ""}`;
+  return fetchJSON(path, s.token);
+}
+
+export async function createPropertyDefinition(
+  s: ApiSettings,
+  req: {
+    key: string;
+    display_name?: string;
+    type?: string;
+    description?: string;
+    status?: string;
+    enum_values?: string[];
+    example_values?: string[];
+  },
+): Promise<PropertyDefinition> {
+  return fetchJSON(`${s.apiBase}/api/${s.projectId}/properties/schema`, s.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function updatePropertyDefinition(
+  s: ApiSettings,
+  key: string,
+  req: {
+    display_name?: string;
+    type?: string;
+    description?: string;
+    status?: string;
+    enum_values?: string[];
+    example_values?: string[];
+  },
+): Promise<PropertyDefinition> {
+  const safeKey = encodeURIComponent(key);
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/properties/schema/${safeKey}`,
+    s.token,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    },
+  );
+}
+
 export async function getMetricsToday(s: ApiSettings): Promise<MetricsToday> {
   return fetchJSON(`${s.apiBase}/api/${s.projectId}/metrics/today`, s.token);
 }
 
 export async function getMetricsTotal(s: ApiSettings): Promise<MetricsTotal> {
   return fetchJSON(`${s.apiBase}/api/${s.projectId}/metrics/total`, s.token);
+}
+
+export async function getUserGrowth(
+  s: ApiSettings,
+  params?: { start?: string; end?: string },
+): Promise<UserGrowthResponse> {
+  const usp = new URLSearchParams();
+  if (params?.start) usp.set("start", params.start);
+  if (params?.end) usp.set("end", params.end);
+  const qs = usp.toString();
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/analytics/users${qs ? `?${qs}` : ""}`,
+    s.token,
+  );
 }
 
 export async function getStorageEstimate(s: ApiSettings): Promise<StorageEstimate> {
@@ -492,6 +725,21 @@ export async function getFunnel(
   return fetchJSON(
     `${s.apiBase}/api/${s.projectId}/analytics/funnel?${usp.toString()}`,
     s.token,
+  );
+}
+
+export async function postCustomAnalytics(
+  s: ApiSettings,
+  body: unknown,
+): Promise<CustomAnalyticsResponse> {
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/analytics/custom`,
+    s.token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
   );
 }
 
@@ -835,6 +1083,23 @@ export async function testAlertRules(
   },
 ): Promise<{ items: AlertRulePreview[] }> {
   return fetchJSON(`${alertsBase(s)}/rules/test`, s.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function testAlertRuleDeliveries(
+  s: ApiSettings,
+  ruleId: number,
+  req: {
+    source?: AlertRuleSource;
+    level?: string;
+    message?: string;
+    fields?: Record<string, unknown>;
+  },
+): Promise<{ created: number; items: { id: number; ruleId: number; channelType: string; target: string; title: string }[] }> {
+  return fetchJSON(`${alertsBase(s)}/rules/${ruleId}/test-deliveries`, s.token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),

@@ -33,6 +33,9 @@ func AutoMigrate(ctx context.Context, db *gorm.DB, opts Options) error {
 		&model.TrackEvent{},
 		&model.TrackEventDaily{},
 		&model.CleanupPolicy{},
+		&model.EventDefinition{},
+		&model.PropertyDefinition{},
+		&model.AnalysisView{},
 
 		// Alerting (optional feature; safe to have tables even if unused).
 		&model.AlertContact{},

@@ -19,7 +19,10 @@ import (
 	"github.com/aak1247/logtap/internal/consumer"
 	"github.com/aak1247/logtap/internal/db"
 	"github.com/aak1247/logtap/internal/detector"
+	"github.com/aak1247/logtap/internal/detector/plugins/httpcheck"
 	"github.com/aak1247/logtap/internal/detector/plugins/logbasic"
+	"github.com/aak1247/logtap/internal/detector/plugins/metricthreshold"
+	"github.com/aak1247/logtap/internal/detector/plugins/tcpcheck"
 	"github.com/aak1247/logtap/internal/enrich"
 	"github.com/aak1247/logtap/internal/httpserver"
 	"github.com/aak1247/logtap/internal/metrics"
@@ -110,6 +113,15 @@ func main() {
 	detectorRegistry := detector.NewRegistry()
 	if err := detectorRegistry.RegisterStatic(logbasic.New()); err != nil {
 		log.Printf("detector register static log_basic: %v", err)
+	}
+	if err := detectorRegistry.RegisterStatic(httpcheck.New()); err != nil {
+		log.Printf("detector register static http_check: %v", err)
+	}
+	if err := detectorRegistry.RegisterStatic(tcpcheck.New()); err != nil {
+		log.Printf("detector register static tcp_check: %v", err)
+	}
+	if err := detectorRegistry.RegisterStatic(metricthreshold.New()); err != nil {
+		log.Printf("detector register static metric_threshold: %v", err)
 	}
 	dynamicLoaded := 0
 	dynamicFailed := 0

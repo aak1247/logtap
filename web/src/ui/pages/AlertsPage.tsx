@@ -18,6 +18,7 @@ import {
   listAlertWebhookEndpoints,
   listAlertWecomBots,
   testAlertRules,
+  testAlertRuleDeliveries,
   updateAlertContact,
   updateAlertContactGroup,
   updateAlertRule,
@@ -1088,6 +1089,25 @@ export function AlertsPage() {
                     <span className="text-sm font-semibold text-zinc-100">{it.ruleName}</span>
                     <StatusPill ok={Boolean(it.matched)} okText="matched" noText="not matched" />
                     <StatusPill ok={Boolean(it.willEnqueue)} okText="will enqueue" noText="suppressed" />
+                    {it.willEnqueue ? (
+                      <button
+                        className="btn btn-xs btn-outline ml-auto"
+                        disabled={Boolean(busy)}
+                        onClick={() =>
+                          void runMutation("已创建测试投递", async () => {
+                            await testAlertRuleDeliveries(settings, it.ruleId, {
+                              source: testSource,
+                              level: testLevel.trim(),
+                              message: testMessage.trim(),
+                              fields: parseJSONObject("fields", testFieldsJSON),
+                            });
+                            await refreshDeliveries();
+                          })
+                        }
+                      >
+                        执行投递
+                      </button>
+                    ) : null}
                   </div>
                   {it.suppressedReason ? (
                     <div className="mt-2 text-xs text-amber-300">
