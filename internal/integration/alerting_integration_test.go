@@ -114,6 +114,92 @@ func TestIntegration_Alerting_Webhook_Delivery(t *testing.T) {
 	}
 }
 
+func TestIntegration_Alerting_ContactsAndGroups_NoRuleIDPath(t *testing.T) {
+	t.Parallel()
+
+	srv := testkit.NewServer(t)
+	client := srv.HTTP.Client()
+	baseURL := srv.HTTP.URL
+	boot := testkit.Bootstrap(t, client, baseURL)
+	authz := map[string]string{"Authorization": "Bearer " + boot.Token}
+
+	status, body := testkit.DoJSON(t, client, http.MethodGet,
+		fmt.Sprintf("%s/api/%d/alerts/contacts", baseURL, boot.ProjectID),
+		nil,
+		authz,
+	)
+	if status != http.StatusOK {
+		t.Fatalf("list contacts status=%d body=%s", status, string(body))
+	}
+	env := testkit.DecodeEnvelope(t, body)
+	if env.Code != 0 {
+		t.Fatalf("list contacts code=%d err=%s", env.Code, env.Err)
+	}
+	var contactsData struct {
+		Items []model.AlertContact `json:"items"`
+	}
+	if err := json.Unmarshal(env.Data, &contactsData); err != nil {
+		t.Fatalf("decode contacts: %v", err)
+	}
+	if len(contactsData.Items) != 0 {
+		t.Fatalf("expected 0 contacts initially, got %d", len(contactsData.Items))
+	}
+
+	status, body = testkit.DoJSON(t, client, http.MethodPost,
+		fmt.Sprintf("%s/api/%d/alerts/contacts", baseURL, boot.ProjectID),
+		map[string]any{
+			"type":  "email",
+			"name":  "oncall",
+			"value": "oncall@example.com",
+		},
+		authz,
+	)
+	if status != http.StatusOK {
+		t.Fatalf("create contact status=%d body=%s", status, string(body))
+	}
+	env = testkit.DecodeEnvelope(t, body)
+	if env.Code != 0 {
+		t.Fatalf("create contact code=%d err=%s", env.Code, env.Err)
+	}
+	var contact model.AlertContact
+	if err := json.Unmarshal(env.Data, &contact); err != nil {
+		t.Fatalf("decode contact: %v", err)
+	}
+	if contact.ID <= 0 || contact.Type != "email" {
+		t.Fatalf("unexpected contact: %+v", contact)
+	}
+
+	status, body = testkit.DoJSON(t, client, http.MethodPost,
+		fmt.Sprintf("%s/api/%d/alerts/contact-groups", baseURL, boot.ProjectID),
+		map[string]any{
+			"type":             "email",
+			"name":             "OnCall Team",
+			"memberContactIds": []int{contact.ID},
+		},
+		authz,
+	)
+	if status != http.StatusOK {
+		t.Fatalf("create contact group status=%d body=%s", status, string(body))
+	}
+	env = testkit.DecodeEnvelope(t, body)
+	if env.Code != 0 {
+		t.Fatalf("create contact group code=%d err=%s", env.Code, env.Err)
+	}
+	var groupData struct {
+		Group            model.AlertContactGroup `json:"group"`
+		MemberContactIDs []int                   `json:"memberContactIds"`
+	}
+	if err := json.Unmarshal(env.Data, &groupData); err != nil {
+		t.Fatalf("decode contact group: %v", err)
+	}
+	if groupData.Group.ID <= 0 {
+		t.Fatalf("expected group id > 0, got %+v", groupData.Group)
+	}
+	if len(groupData.MemberContactIDs) != 1 || groupData.MemberContactIDs[0] != contact.ID {
+		t.Fatalf("unexpected group members: %+v", groupData.MemberContactIDs)
+	}
+}
+
 func TestIntegration_Alerting_RulesTest(t *testing.T) {
 	t.Parallel()
 
