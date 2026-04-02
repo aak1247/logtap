@@ -146,7 +146,7 @@
 - [x] `D-002` 新增 monitor 链路集成测试（`internal/integration/monitor_integration_test.go`）
 - [x] `D-003` 拆分 UI smoke 用例并新增 monitor run/runs 场景（`web/e2e/auth-project.spec.ts`, `web/e2e/monitor-runs.spec.ts`）
 - [x] `D-004` 新增 Settings/Key 生命周期 UI E2E 用例（`web/e2e/settings-keys.spec.ts`）
-- [x] `D-005` Playwright 浏览器安装阻塞解除（代理 `http://172.168.3.53:7890`，`npx playwright install chromium` 成功）
+- [x] `D-005` Playwright 浏览器安装阻塞解除（配置代理后 `npx playwright install chromium` 成功）
 - [x] `D-006` 新增 CI E2E 回归工作流（`.github/workflows/e2e-regression.yml`）
 - [x] `D-007` 新增事件列表/详情 UI E2E 用例（`web/e2e/events-detail.spec.ts`）
 - [x] `D-008` 新增 CI 落地清单与验收标准（`docs/specs/e2e-ci-rollout-v1.md`）
