@@ -10,6 +10,11 @@ const devApiTarget =
 
 export default defineConfig({
   plugins: [react()],
+  test: {
+    environment: "jsdom",
+    setupFiles: "./src/test/setup.ts",
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+  },
   server: {
     port: 5173,
     fs: {

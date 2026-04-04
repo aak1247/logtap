@@ -16,6 +16,7 @@ import {
   type MonitorTestResult,
 } from "../../../lib/api";
 import { Panel } from "../../components/Panel";
+import { SchemaForm, type JsonSchema, type FieldError } from "../../components/schema-form";
 
 type MonitorFormState = {
   monitorId: number;
@@ -51,6 +52,8 @@ export function MonitorTab(props: { settings: ApiSettings }) {
   const [monitors, setMonitors] = useState<MonitorDefinition[]>([]);
 
   const [form, setForm] = useState<MonitorFormState>(() => createDefaultMonitorForm());
+  const [configMode, setConfigMode] = useState<"form" | "json">("form");
+  const [formErrors, setFormErrors] = useState<FieldError[]>([]);
 
   const [selectedRunsMonitorId, setSelectedRunsMonitorId] = useState(0);
   const [runs, setRuns] = useState<MonitorRun[]>([]);
@@ -63,6 +66,25 @@ export function MonitorTab(props: { settings: ApiSettings }) {
   }, [detectors]);
 
   const currentSchema = form.detectorType ? detectorSchemas[form.detectorType] : undefined;
+
+  // Parse configJSON to object for SchemaForm
+  const configObject = useMemo(() => {
+    try {
+      return parseConfigToRecord(form.configJSON);
+    } catch {
+      return {};
+    }
+  }, [form.configJSON]);
+
+  // Typed schema for SchemaForm
+  const typedSchema = useMemo((): JsonSchema | null => {
+    if (!currentSchema || typeof currentSchema !== "object") return null;
+    const schema = currentSchema as Record<string, unknown>;
+    if (schema.type !== "object" || typeof schema.properties !== "object") {
+      return null;
+    }
+    return schema as unknown as JsonSchema;
+  }, [currentSchema]);
 
   useEffect(() => {
     void loadBaseData();
@@ -147,6 +169,8 @@ export function MonitorTab(props: { settings: ApiSettings }) {
       ...createDefaultMonitorForm(),
       detectorType: prev.detectorType || sortedDetectors[0]?.type || "",
     }));
+    setFormErrors([]);
+    setTestResult(null);
   }
 
   function startEdit(monitor: MonitorDefinition) {
@@ -159,7 +183,17 @@ export function MonitorTab(props: { settings: ApiSettings }) {
       enabled: Boolean(monitor.enabled),
       configJSON: stringifyJSON(monitor.config),
     });
+    setFormErrors([]);
     setTestResult(null);
+  }
+
+  function handleConfigChange(newConfig: Record<string, unknown>) {
+    setForm((prev) => ({
+      ...prev,
+      configJSON: stringifyJSON(newConfig),
+    }));
+    // Clear form errors when config changes
+    setFormErrors([]);
   }
 
   async function saveMonitor() {
@@ -263,22 +297,77 @@ export function MonitorTab(props: { settings: ApiSettings }) {
             />
           </div>
 
-          <JsonField
-            label="Config JSON"
-            value={form.configJSON}
-            onChange={(v) => setForm((prev) => ({ ...prev, configJSON: v }))}
-            rows={8}
-          />
-
-          <div className="rounded-lg border border-zinc-900 bg-zinc-950/40 p-3">
-            <div className="mb-2 text-xs text-zinc-400">
-              Detector Schema
-              {schemaLoading ? "（加载中）" : ""}
+          {/* Config Section with Mode Toggle */}
+          <div className="rounded-lg border border-zinc-900 bg-zinc-950/40 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-xs text-zinc-400">
+                插件配置
+                {schemaLoading ? "（加载中）" : ""}
+              </div>
+              <div className="flex gap-1 rounded-md border border-zinc-800 bg-zinc-950 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setConfigMode("form")}
+                  className={`rounded px-2 py-1 text-xs ${
+                    configMode === "form"
+                      ? "bg-indigo-600 text-white"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  表单模式
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfigMode("json")}
+                  className={`rounded px-2 py-1 text-xs ${
+                    configMode === "json"
+                      ? "bg-indigo-600 text-white"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  JSON模式
+                </button>
+              </div>
             </div>
-            <pre className="max-h-64 overflow-auto rounded-md border border-zinc-900 bg-zinc-950 p-3 font-mono text-xs text-zinc-300">
-              {stringifyJSON(currentSchema ?? {})}
-            </pre>
+
+            {configMode === "form" ? (
+              typedSchema ? (
+                <SchemaForm
+                  schema={typedSchema}
+                  value={configObject}
+                  onChange={handleConfigChange}
+                  errors={formErrors}
+                  disabled={Boolean(busy)}
+                />
+              ) : (
+                <div className="py-4 text-center text-sm text-zinc-500">
+                  {schemaLoading ? "正在加载表单配置..." : "请先选择检测器类型"}
+                </div>
+              )
+            ) : (
+              <JsonField
+                label=""
+                value={form.configJSON}
+                onChange={(v) => {
+                  setForm((prev) => ({ ...prev, configJSON: v }));
+                  setFormErrors([]);
+                }}
+                rows={10}
+              />
+            )}
           </div>
+
+          {/* Schema Reference (collapsible) */}
+          <details className="rounded-lg border border-zinc-900 bg-zinc-950/40">
+            <summary className="cursor-pointer px-3 py-2 text-xs text-zinc-400 hover:text-zinc-300">
+              Detector Schema 参考
+            </summary>
+            <div className="border-t border-zinc-900 p-3">
+              <pre className="max-h-64 overflow-auto rounded-md border border-zinc-900 bg-zinc-950 p-3 font-mono text-xs text-zinc-300">
+                {stringifyJSON(currentSchema ?? {})}
+              </pre>
+            </div>
+          </details>
 
           <div className="flex flex-wrap gap-2">
             <button
@@ -587,13 +676,13 @@ function ToggleField(props: { label: string; checked: boolean; onChange: (v: boo
 function JsonField(props: { label: string; value: string; onChange: (v: string) => void; rows?: number }) {
   return (
     <div>
-      <div className="text-xs text-zinc-400">{props.label}</div>
+      {props.label && <div className="text-xs text-zinc-400">{props.label}</div>}
       <textarea
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}
         rows={props.rows ?? 8}
         spellCheck={false}
-        className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-100 outline-none focus:border-indigo-500"
+        className={`${props.label ? "mt-1" : ""} w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-100 outline-none focus:border-indigo-500`}
       />
     </div>
   );
@@ -626,6 +715,20 @@ function parseConfigObject(raw: string): Record<string, unknown> {
     throw new Error("config 必须是 JSON 对象");
   }
   return parsed as Record<string, unknown>;
+}
+
+function parseConfigToRecord(raw: string): Record<string, unknown> {
+  try {
+    const text = raw.trim();
+    if (!text) return {};
+    const parsed = JSON.parse(text);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+      return {};
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return {};
+  }
 }
 
 function stringifyJSON(value: unknown): string {
