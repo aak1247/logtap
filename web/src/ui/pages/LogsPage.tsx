@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { loadSettings } from "../../lib/storage";
 import { searchLogs, type LogRow } from "../../lib/api";
 import { Panel } from "../components/Panel";
+import { TimeRangePicker } from "../components/DateTimePicker";
 import { useNavigate } from "react-router-dom";
 
 export function LogsPage() {
@@ -85,8 +86,15 @@ export function LogsPage() {
           <Field label="q" value={q} onChange={setQ} placeholder="payment failed" />
           <Field label="trace_id" value={traceId} onChange={setTraceId} placeholder="abc123" />
           <Field label="level" value={level} onChange={setLevel} placeholder="info/error" />
-          <Field label="start" value={start} onChange={setStart} placeholder="2025-01-01T00:00:00Z" />
-          <Field label="end" value={end} onChange={setEnd} placeholder="2025-01-01T23:59:59Z" />
+          <div className="md:col-span-2">
+            <TimeRangePicker
+              label="时间范围"
+              start={start}
+              end={end}
+              onStartChange={setStart}
+              onEndChange={setEnd}
+            />
+          </div>
           <Field
             label="limit"
             value={String(limit)}

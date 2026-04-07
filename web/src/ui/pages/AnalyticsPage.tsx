@@ -19,6 +19,7 @@ import {
 } from "../../lib/api";
 import { loadSettings } from "../../lib/storage";
 import { clampFunnelDays, loadFunnelDays, saveFunnelDays } from "../../lib/prefs";
+import { TimeRangePicker } from "../components/DateTimePicker";
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
 import { useNavigate } from "react-router-dom";
@@ -45,6 +46,10 @@ export function AnalyticsPage() {
   const [funnelStepsText, setFunnelStepsText] = useState("signup,checkout,paid");
   const [funnelWithin, setFunnelWithin] = useState("24h");
   const [funnelDays, setFunnelDays] = useState(() => loadFunnelDays());
+  const [funnelStart, setFunnelStart] = useState(() =>
+    buildRangeFromDays(loadFunnelDays()).start,
+  );
+  const [funnelEnd, setFunnelEnd] = useState(() => buildRangeFromDays(loadFunnelDays()).end);
   const [funnel, setFunnel] = useState<FunnelResponse | null>(null);
   const [funnelBusy, setFunnelBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -170,6 +175,10 @@ export function AnalyticsPage() {
             setFunnelWithin={setFunnelWithin}
             funnelDays={funnelDays}
             setFunnelDays={setFunnelDays}
+            funnelStart={funnelStart}
+            setFunnelStart={setFunnelStart}
+            funnelEnd={funnelEnd}
+            setFunnelEnd={setFunnelEnd}
             funnel={funnel}
             setFunnel={setFunnel}
             funnelBusy={funnelBusy}
@@ -207,6 +216,10 @@ type BasicAnalyticsProps = {
   setFunnelWithin: (v: string) => void;
   funnelDays: number;
   setFunnelDays: (v: number) => void;
+  funnelStart: string;
+  setFunnelStart: (v: string) => void;
+  funnelEnd: string;
+  setFunnelEnd: (v: string) => void;
   funnel: FunnelResponse | null;
   setFunnel: (v: FunnelResponse | null) => void;
   funnelBusy: boolean;
@@ -232,6 +245,10 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
     setFunnelWithin,
     funnelDays,
     setFunnelDays,
+    funnelStart,
+    setFunnelStart,
+    funnelEnd,
+    setFunnelEnd,
     funnel,
     setFunnel,
     funnelBusy,
@@ -373,17 +390,28 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
                     className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
                   />
                 </div>
-                <div>
-                  <div className="text-xs text-zinc-400">时间范围（天）</div>
-                  <input
-                    value={String(funnelDays)}
-                    onChange={(e) => {
-                      const next = clampFunnelDays(Number(e.target.value || "7"));
-                      setFunnelDays(next);
-                      saveFunnelDays(next);
+                <div className="md:col-span-2">
+                  <TimeRangePicker
+                    label={`时间范围（${funnelDays} 天）`}
+                    start={funnelStart}
+                    end={funnelEnd}
+                    onStartChange={(nextStart) => {
+                      setFunnelStart(nextStart);
+                      const nextDays = clampFunnelDays(getRangeDays(nextStart, funnelEnd, funnelDays));
+                      setFunnelDays(nextDays);
+                      saveFunnelDays(nextDays);
                     }}
-                    placeholder="7"
-                    className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+                    onEndChange={(nextEnd) => {
+                      setFunnelEnd(nextEnd);
+                      const nextDays = clampFunnelDays(getRangeDays(funnelStart, nextEnd, funnelDays));
+                      setFunnelDays(nextDays);
+                      saveFunnelDays(nextDays);
+                    }}
+                    onRangePresetChange={(nextStart, nextEnd) => {
+                      const nextDays = clampFunnelDays(getRangeDays(nextStart, nextEnd, funnelDays));
+                      setFunnelDays(nextDays);
+                      saveFunnelDays(nextDays);
+                    }}
                   />
                 </div>
                 <div className="flex items-end">
@@ -408,12 +436,18 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
                           return;
                         }
 
-                        const end = new Date();
-                        const start = new Date(end.getTime() - (rangeDays - 1) * 24 * 3600 * 1000);
+                        const rangeStart =
+                          funnelStart && !Number.isNaN(new Date(funnelStart).getTime())
+                            ? new Date(funnelStart)
+                            : new Date(Date.now() - (rangeDays - 1) * 24 * 3600 * 1000);
+                        const rangeEnd =
+                          funnelEnd && !Number.isNaN(new Date(funnelEnd).getTime())
+                            ? new Date(funnelEnd)
+                            : new Date();
                         const res = await getFunnel(settings, {
                           steps,
-                          start: start.toISOString(),
-                          end: end.toISOString(),
+                          start: rangeStart.toISOString(),
+                          end: rangeEnd.toISOString(),
                           within: funnelWithin.trim() || undefined,
                         });
                         setFunnel(res);
@@ -615,4 +649,24 @@ function FunnelTable(props: { data: FunnelResponse | null }) {
       </table>
     </div>
   );
+}
+
+function buildRangeFromDays(days: number): { start: string; end: string } {
+  const safeDays = clampFunnelDays(days);
+  const end = new Date();
+  const start = new Date(end.getTime() - (safeDays - 1) * 24 * 3600 * 1000);
+  return {
+    start: start.toISOString(),
+    end: end.toISOString(),
+  };
+}
+
+function getRangeDays(startIso: string, endIso: string, fallbackDays: number): number {
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return fallbackDays;
+  }
+  const diffMs = Math.max(0, end.getTime() - start.getTime());
+  return Math.floor(diffMs / (24 * 60 * 60 * 1000)) + 1;
 }

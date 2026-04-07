@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Panel } from "../../components/Panel";
 import { Sparkline } from "../../components/Sparkline";
+import { TimeRangePicker } from "../../components/DateTimePicker";
 import {
   postCustomAnalytics,
   createAnalysisView,
@@ -21,6 +22,8 @@ export type EventAnalyticsPanelProps = {
 export function EventAnalyticsPanel(props: EventAnalyticsPanelProps) {
   const { settings } = props;
   const [days, setDays] = useState(7);
+  const [rangeStart, setRangeStart] = useState(() => buildRangeFromDays(7).start);
+  const [rangeEnd, setRangeEnd] = useState(() => buildRangeFromDays(7).end);
   const [eventNamesText, setEventNamesText] = useState("");
   const [metric, setMetric] = useState<"count_events" | "count_users">(
     "count_events",
@@ -76,13 +79,14 @@ export function EventAnalyticsPanel(props: EventAnalyticsPanelProps) {
   const buildRequestBody = () => {
     const events = Array.from(new Set(parseEventNames(eventNamesText)));
 
-    const now = new Date();
-    const end = now.toISOString();
     const dayCount = Number.isFinite(days) && days > 0 ? days : 7;
-    const startDate = new Date(
-      now.getTime() - (dayCount - 1) * 24 * 60 * 60 * 1000,
-    );
-    const start = startDate.toISOString();
+    const fallback = buildRangeFromDays(dayCount);
+    const startDate = new Date(rangeStart);
+    const endDate = new Date(rangeEnd);
+    const start = Number.isNaN(startDate.getTime())
+      ? fallback.start
+      : startDate.toISOString();
+    const end = Number.isNaN(endDate.getTime()) ? fallback.end : endDate.toISOString();
 
     const groupBy: string[] = ["time"];
     const propKey = propertyKey.trim();
@@ -225,6 +229,8 @@ export function EventAnalyticsPanel(props: EventAnalyticsPanelProps) {
         const start = new Date(tr.start);
         const end = new Date(tr.end);
         if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+          setRangeStart(start.toISOString());
+          setRangeEnd(end.toISOString());
           const diffMs = Math.max(0, end.getTime() - start.getTime());
           const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000)) + 1;
           const clamped = Math.min(Math.max(diffDays, 1), 180);
@@ -271,23 +277,33 @@ export function EventAnalyticsPanel(props: EventAnalyticsPanelProps) {
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
             <div>
-              <div className="text-xs text-zinc-400">时间范围（天）</div>
-              <input
-                type="number"
-                min={1}
-                max={180}
-                value={days}
-                onChange={(e) => {
-                  const v = Number(e.target.value || "7");
-                  if (!Number.isFinite(v) || v <= 0) {
-                    setDays(7);
-                  } else if (v > 180) {
-                    setDays(180);
-                  } else {
-                    setDays(v);
-                  }
+              <TimeRangePicker
+                label={`时间范围（${days} 天）`}
+                start={rangeStart}
+                end={rangeEnd}
+                onStartChange={(nextStart) => {
+                  setRangeStart(nextStart);
+                  const nextDays = Math.min(
+                    Math.max(getRangeDays(nextStart, rangeEnd, days), 1),
+                    180,
+                  );
+                  setDays(nextDays);
                 }}
-                className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+                onEndChange={(nextEnd) => {
+                  setRangeEnd(nextEnd);
+                  const nextDays = Math.min(
+                    Math.max(getRangeDays(rangeStart, nextEnd, days), 1),
+                    180,
+                  );
+                  setDays(nextDays);
+                }}
+                onRangePresetChange={(nextStart, nextEnd) => {
+                  const nextDays = Math.min(
+                    Math.max(getRangeDays(nextStart, nextEnd, days), 1),
+                    180,
+                  );
+                  setDays(nextDays);
+                }}
               />
             </div>
             <div className="md:col-span-2">
@@ -717,3 +733,22 @@ function parseEventNames(text: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+function buildRangeFromDays(days: number): { start: string; end: string } {
+  const safeDays = Number.isFinite(days) && days > 0 ? Math.min(days, 180) : 7;
+  const end = new Date();
+  const start = new Date(end.getTime() - (safeDays - 1) * 24 * 60 * 60 * 1000);
+  return {
+    start: start.toISOString(),
+    end: end.toISOString(),
+  };
+}
+
+function getRangeDays(startIso: string, endIso: string, fallbackDays: number): number {
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return fallbackDays;
+  }
+  const diffMs = Math.max(0, end.getTime() - start.getTime());
+  return Math.floor(diffMs / (24 * 60 * 60 * 1000)) + 1;
+}
