@@ -2,6 +2,20 @@
 
 用于向 logtap 网关上报「结构化日志」与「埋点事件」。
 
+## 安装
+
+```yaml
+# pubspec.yaml
+dependencies:
+  logtap_flutter: ^latest
+```
+
+或命令行：
+
+```bash
+flutter pub add logtap_flutter
+```
+
 ## 使用
 
 ```dart

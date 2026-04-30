@@ -2,9 +2,13 @@
 
 用于向 logtap 网关上报「结构化日志」与「埋点事件」。
 
-## 安装/导入
+## 安装
 
-本仓库内置 Go SDK 包：
+```bash
+go get github.com/aak1247/logtap/sdks/go/logtap
+```
+
+## 导入
 
 ```go
 import "github.com/aak1247/logtap/sdks/go/logtap"

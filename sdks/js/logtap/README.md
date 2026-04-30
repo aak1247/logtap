@@ -2,6 +2,12 @@
 
 用于向 logtap 网关上报「结构化日志」与「埋点事件」。
 
+## 安装
+
+```bash
+npm install logtap-sdk
+```
+
 ## 配置
 
 ```js
