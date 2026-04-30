@@ -75,4 +75,4 @@ require (
 	modernc.org/sqlite v1.23.1 // indirect
 )
 
-replace github.com/aak1247/logtap-go => ./sdks/go/logtap
+replace github.com/aak1247/logtap/sdks/go/logtap => ./sdks/go/logtap

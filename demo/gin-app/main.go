@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aak1247/logtap-go"
+	"github.com/aak1247/logtap/sdks/go/logtap"
 	"github.com/gin-gonic/gin"
 )
 
