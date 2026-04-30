@@ -43,12 +43,12 @@ await client.close();
 
 ## Go SDK
 
-目录：`sdks/go/logtap/`（包：`github.com/aak1247/logtap-go`）
+目录：`sdks/go/logtap/`（包：`github.com/aak1247/logtap/sdks/go/logtap`）
 
 ### 安装
 
 ```bash
-go get github.com/aak1247/logtap-go
+go get github.com/aak1247/logtap/sdks/go/logtap
 ```
 
 ```go

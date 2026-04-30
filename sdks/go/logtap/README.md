@@ -5,13 +5,13 @@
 ## 安装
 
 ```bash
-go get github.com/aak1247/logtap-go
+go get github.com/aak1247/logtap/sdks/go/logtap
 ```
 
 ## 导入
 
 ```go
-import logtap "github.com/aak1247/logtap-go"
+import "github.com/aak1247/logtap/sdks/go/logtap"
 ```
 
 ```go
