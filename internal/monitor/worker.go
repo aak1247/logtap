@@ -19,6 +19,7 @@ import (
 type Worker struct {
 	DB            *gorm.DB
 	Registry      *detector.Registry
+	Store         *detector.ResultStore
 	Engine        *alert.Engine
 	TickInterval  time.Duration
 	BatchSize     int
@@ -36,7 +37,7 @@ func NewWorker(db *gorm.DB, registry *detector.Registry) *Worker {
 	return &Worker{
 		DB:            db,
 		Registry:      registry,
-		Engine:        alert.NewEngine(db),
+		Engine:        alert.NewEngine(db, nil),
 		TickInterval:  2 * time.Second,
 		BatchSize:     20,
 		LeaseDuration: 60 * time.Second,
@@ -195,7 +196,7 @@ func (w *Worker) executeOne(ctx context.Context, item model.MonitorDefinition) e
 	for _, sig := range signals {
 		normalized := normalizeSignal(item, sig, startedAt)
 		if w.Engine == nil {
-			w.Engine = alert.NewEngine(w.DB)
+			w.Engine = alert.NewEngine(w.DB, nil)
 		}
 		if err := w.Engine.EvaluateSignal(execCtx, normalized); err != nil {
 			res.Status = "failed"
@@ -206,6 +207,16 @@ func (w *Worker) executeOne(ctx context.Context, item model.MonitorDefinition) e
 	}
 	res.Details["signals"] = res.SignalCount
 	res.Details["intervalSec"] = intervalSec
+
+	// Persist typed results if plugin supports ResultStorePlugin.
+	if rs, ok := p.(detector.ResultStorePlugin); ok {
+		typedResults := buildTypedResults(item, signals, startedAt)
+		if err := rs.StoreResults(execCtx, item.ProjectID, typedResults); err != nil {
+			// Log but don't fail the run.
+			res.Details["store_error"] = err.Error()
+		}
+	}
+
 	return w.finalizeRun(ctx, item, startedAt, res)
 }
 
@@ -321,4 +332,29 @@ func (w *Worker) nowUTC() time.Time {
 		return time.Now().UTC()
 	}
 	return t.UTC()
+}
+
+func buildTypedResults(item model.MonitorDefinition, signals []detector.Signal, ts time.Time) []detector.TypedResult {
+	if len(signals) == 0 {
+		return nil
+	}
+	results := make([]detector.TypedResult, 0, len(signals))
+	for _, sig := range signals {
+		data, _ := json.Marshal(sig.Fields)
+		tags := sig.Labels
+		if tags == nil {
+			tags = map[string]string{}
+		}
+		tags["severity"] = sig.Severity
+		tags["status"] = sig.Status
+		results = append(results, detector.TypedResult{
+			DetectorType: item.DetectorType,
+			ProjectID:    item.ProjectID,
+			MonitorID:    item.ID,
+			Timestamp:    ts,
+			Data:         json.RawMessage(data),
+			Tags:         tags,
+		})
+	}
+	return results
 }

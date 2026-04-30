@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/aak1247/logtap/internal/detector"
 	"github.com/aak1247/logtap/internal/model"
 	"gorm.io/gorm"
 )
@@ -50,6 +51,11 @@ func AutoMigrate(ctx context.Context, db *gorm.DB, opts Options) error {
 		&model.MonitorRun{},
 	); err != nil {
 		return err
+	}
+
+	// Detector result persistence (handled by detector package, but also migrate here for consistency).
+	if err := gdb.AutoMigrate(&detector.DetectorResult{}); err != nil {
+		return fmt.Errorf("auto migrate detector_results: %w", err)
 	}
 
 	// GIN indexes for JSONB.

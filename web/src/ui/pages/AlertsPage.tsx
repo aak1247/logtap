@@ -17,6 +17,7 @@ import {
   listAlertRules,
   listAlertWebhookEndpoints,
   listAlertWecomBots,
+  listChannels,
   testAlertRules,
   testAlertRuleDeliveries,
   updateAlertContact,
@@ -32,7 +33,10 @@ import {
   type AlertRuleSource,
   type AlertWebhookEndpoint,
   type AlertWecomBot,
+  type ChannelDescriptor,
 } from "../../lib/api";
+import { SchemaForm } from "../components/schema-form/SchemaForm";
+import type { JsonSchema } from "../components/schema-form/types";
 import { loadSettings, subscribeSettingsChange } from "../../lib/storage";
 import { Panel } from "../components/Panel";
 import { MonitorTab } from "./alerts/MonitorTab";
@@ -72,6 +76,7 @@ type RuleFormState = {
   smsContactIds: number[];
   wecomBotIds: number[];
   webhookEndpointIds: number[];
+  pluginChannels: { type: string; config: Record<string, unknown> }[];
 };
 
 function createDefaultRuleForm(): RuleFormState {
@@ -95,6 +100,7 @@ function createDefaultRuleForm(): RuleFormState {
     smsContactIds: [],
     wecomBotIds: [],
     webhookEndpointIds: [],
+    pluginChannels: [],
   };
 }
 
@@ -114,6 +120,7 @@ export function AlertsPage() {
   const [webhookEndpoints, setWebhookEndpoints] = useState<AlertWebhookEndpoint[]>([]);
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [deliveries, setDeliveries] = useState<AlertDelivery[]>([]);
+  const [channelTypes, setChannelTypes] = useState<ChannelDescriptor[]>([]);
   const [rulePreviewItems, setRulePreviewItems] = useState<AlertRulePreview[]>([]);
 
   const [newContactType, setNewContactType] = useState<"email" | "sms">("email");
@@ -196,7 +203,7 @@ export function AlertsPage() {
     try {
       setLoading(true);
       setErr("");
-      const [contactsRes, groupsRes, botsRes, endpointsRes, rulesRes, deliveriesRes] =
+      const [contactsRes, groupsRes, botsRes, endpointsRes, rulesRes, deliveriesRes, channelsRes] =
         await Promise.all([
           listAlertContacts(settings),
           listAlertContactGroups(settings),
@@ -204,6 +211,7 @@ export function AlertsPage() {
           listAlertWebhookEndpoints(settings),
           listAlertRules(settings),
           listAlertDeliveries(settings, { limit: parseLimit(filterLimit) }),
+          listChannels(settings).catch(() => ({ items: [] })),
         ]);
       setContacts(contactsRes.items);
       setGroups(groupsRes.items);
@@ -211,6 +219,7 @@ export function AlertsPage() {
       setWebhookEndpoints(endpointsRes.items);
       setRules(rulesRes.items);
       setDeliveries(deliveriesRes.items);
+      setChannelTypes(channelsRes.items || []);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -898,6 +907,38 @@ export function AlertsPage() {
         </div>
       ) : null}
 
+      {/* Plugin Channels Info */}
+      {activeTab === "channels" && channelTypes.length > 0 ? (
+        <Panel title="插件通知渠道">
+          <div className="text-xs text-zinc-400 mb-3">以下渠道通过插件注册，可在告警规则中使用。</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="text-zinc-500">
+                <tr>
+                  <th className="py-2 pr-4">类型</th>
+                  <th className="py-2 pr-4">配置 Schema</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-900">
+                {channelTypes.map((ch) => (
+                  <tr key={ch.type} className="hover:bg-zinc-900/40">
+                    <td className="py-2 pr-4 font-mono text-zinc-100">{ch.type}</td>
+                    <td className="py-2 pr-4">
+                      <details>
+                        <summary className="cursor-pointer text-xs text-zinc-400 hover:text-zinc-200">查看 Schema</summary>
+                        <pre className="mt-1 max-h-48 overflow-auto rounded bg-zinc-900 p-2 text-[10px] text-zinc-300">
+                          {JSON.stringify(ch.schema, null, 2)}
+                        </pre>
+                      </details>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      ) : null}
+
       {activeTab === "rules" ? (
         <div className="space-y-4">
           <Panel title="新建规则（可视化）">
@@ -908,6 +949,7 @@ export function AlertsPage() {
               groupsByType={groupsByType}
               wecomBots={wecomBots}
               webhookEndpoints={webhookEndpoints}
+              channelTypes={channelTypes}
             />
             <div className="mt-3 flex justify-end gap-2">
               <button
@@ -1002,6 +1044,7 @@ export function AlertsPage() {
                               groupsByType={groupsByType}
                               wecomBots={wecomBots}
                               webhookEndpoints={webhookEndpoints}
+                              channelTypes={channelTypes}
                             />
                             <div className="mt-3 flex justify-end gap-2">
                               <button className="btn btn-xs btn-outline" onClick={() => setEditRuleId(0)}>
@@ -1337,6 +1380,7 @@ function RuleFormEditor(props: {
   groupsByType: { email: AlertContactGroupWithMembers[]; sms: AlertContactGroupWithMembers[] };
   wecomBots: AlertWecomBot[];
   webhookEndpoints: AlertWebhookEndpoint[];
+  channelTypes: ChannelDescriptor[];
 }) {
   const f = props.form;
   const set = (patch: Partial<RuleFormState>) => props.onChange({ ...f, ...patch });
@@ -1554,6 +1598,51 @@ function RuleFormEditor(props: {
             onChange={(ids) => set({ webhookEndpointIds: ids })}
           />
         </div>
+        {props.channelTypes.length > 0 && (
+          <div className="mt-4 border-t border-zinc-800 pt-3">
+            <div className="mb-2 text-sm font-semibold text-zinc-100">插件渠道</div>
+            <div className="space-y-3">
+              {props.channelTypes.map((ch) => {
+                const existing = f.pluginChannels.find((c) => c.type === ch.type);
+                const enabled = !!existing;
+                return (
+                  <div key={ch.type} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-mono text-zinc-200">{ch.type}</span>
+                      <button
+                        className={`text-xs px-2 py-1 rounded ${enabled ? 'bg-red-950/50 text-red-300 hover:bg-red-950' : 'bg-emerald-950/50 text-emerald-300 hover:bg-emerald-950'}`}
+                        onClick={() => {
+                          if (enabled) {
+                            set({ pluginChannels: f.pluginChannels.filter((c) => c.type !== ch.type) });
+                          } else {
+                            set({ pluginChannels: [...f.pluginChannels, { type: ch.type, config: {} }] });
+                          }
+                        }}
+                      >
+                        {enabled ? '移除' : '启用'}
+                      </button>
+                    </div>
+                    {enabled && ch.schema && typeof ch.schema === 'object' ? (
+                      <div className="mt-2">
+                        <SchemaForm
+                          schema={ch.schema as JsonSchema}
+                          value={existing?.config || {}}
+                          onChange={(config) => {
+                            set({
+                              pluginChannels: f.pluginChannels.map((c) =>
+                                c.type === ch.type ? { ...c, config } : c,
+                              ),
+                            });
+                          }}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1715,6 +1804,7 @@ function buildRulePayloadFromForm(form: RuleFormState): {
   if (form.smsContactIds.length > 0) targets.smsContactIds = uniqueInts(form.smsContactIds);
   if (form.wecomBotIds.length > 0) targets.wecomBotIds = uniqueInts(form.wecomBotIds);
   if (form.webhookEndpointIds.length > 0) targets.webhookEndpointIds = uniqueInts(form.webhookEndpointIds);
+  if (form.pluginChannels.length > 0) targets.channels = form.pluginChannels;
 
   return {
     name,
@@ -1766,12 +1856,26 @@ function ruleToForm(rule: AlertRule): RuleFormState {
     webhookEndpointIds: uniqueInts(
       asArray(targets.webhookEndpointIds).map((v) => parseIntOrZero(toText(v))).filter((v) => v > 0),
     ),
+    pluginChannels: parsePluginChannels(targets.channels),
   };
 }
 
 function asRecord(v: unknown): Record<string, unknown> {
   if (!v || Array.isArray(v) || typeof v !== "object") return {};
   return v as Record<string, unknown>;
+}
+
+function parsePluginChannels(v: unknown): { type: string; config: Record<string, unknown> }[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((item) => {
+      const rec = asRecord(item);
+      const t = typeof rec.type === "string" ? rec.type : "";
+      if (!t) return null;
+      const config = asRecord(rec.config);
+      return { type: t, config };
+    })
+    .filter((x): x is { type: string; config: Record<string, unknown> } => x !== null);
 }
 
 function asArray(v: unknown): unknown[] {

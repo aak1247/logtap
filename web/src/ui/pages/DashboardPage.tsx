@@ -13,6 +13,9 @@ import { loadSettings } from "../../lib/storage";
 import { Panel } from "../components/Panel";
 import { StatCard } from "../components/StatCard";
 import { Link, useNavigate } from "react-router-dom";
+// import side-effect to register built-in widgets
+import "../widgets/builtins";
+import { widgetRegistry } from "../widgets/registry";
 
 export function DashboardPage() {
   const settings = useMemo(() => loadSettings(), []);
@@ -21,6 +24,7 @@ export function DashboardPage() {
   const [total, setTotal] = useState<MetricsTotal | null>(null);
   const [storage, setStorage] = useState<StorageEstimate | null>(null);
   const [events, setEvents] = useState<RecentEvent[]>([]);
+
   const [err, setErr] = useState<string>("");
 
   useEffect(() => {
@@ -58,6 +62,8 @@ export function DashboardPage() {
     };
   }, [settings.apiBase, settings.projectId]);
 
+  const widgets = useMemo(() => widgetRegistry.getAll(), []);
+
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between">
@@ -88,6 +94,18 @@ export function DashboardPage() {
         />
         <StatCard title="今日错误" value={metrics ? metrics.errors : "—"} />
         <StatCard title="今日用户(去重)" value={metrics ? metrics.users : "—"} />
+      </div>
+
+      {/* Widget 区域 */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {widgets.map((w) => {
+          const C = w.component;
+          return (
+            <Panel key={w.type} title={w.title}>
+              <C settings={settings} />
+            </Panel>
+          );
+        })}
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">

@@ -16,12 +16,14 @@ var (
 
 type Service struct {
 	Registry *Registry
+	Store    *ResultStore
 	Now      func() time.Time
 }
 
-func NewService(registry *Registry) *Service {
+func NewService(registry *Registry, store *ResultStore) *Service {
 	return &Service{
 		Registry: registry,
+		Store:    store,
 		Now:      time.Now,
 	}
 }
@@ -70,6 +72,30 @@ func (s *Service) TestExecute(ctx context.Context, detectorType string, req Exec
 	signals, err := p.Execute(ctx, req)
 	elapsed := s.nowUTC().Sub(start)
 	return signals, elapsed, err
+}
+
+func (s *Service) HealthCheck(ctx context.Context, detectorType string) error {
+	p, err := s.getPlugin(detectorType)
+	if err != nil {
+		return err
+	}
+	hc, ok := p.(HealthCheckPlugin)
+	if !ok {
+		return fmt.Errorf("detector %s does not implement HealthCheckPlugin", detectorType)
+	}
+	return hc.HealthCheck(ctx)
+}
+
+func (s *Service) Aggregate(ctx context.Context, detectorType string, projectID int, tr TimeRange, interval AggregateInterval) ([]MetricPoint, error) {
+	p, err := s.getPlugin(detectorType)
+	if err != nil {
+		return nil, err
+	}
+	agg, ok := p.(AggregatablePlugin)
+	if !ok {
+		return nil, fmt.Errorf("detector %s does not implement AggregatablePlugin", detectorType)
+	}
+	return agg.Aggregate(ctx, projectID, tr, interval)
 }
 
 func (s *Service) getPlugin(detectorType string) (DetectorPlugin, error) {

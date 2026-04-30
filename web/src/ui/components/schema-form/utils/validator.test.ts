@@ -79,17 +79,17 @@ describe('validateForm', () => {
   it('validates full form including nested object paths', () => {
     const schema = {
       properties: {
-        url: { type: 'string', format: 'uri' as const },
-        retries: { type: 'integer', minimum: 1 },
+        url: { type: 'string' as const, format: 'uri' },
+        retries: { type: 'integer' as const, minimum: 1 },
         meta: {
           type: 'object' as const,
           properties: {
-            email: { type: 'string', format: 'email' as const },
+            email: { type: 'string' as const, format: 'email' },
           },
         },
       },
       required: ['url'],
-    };
+    } satisfies { properties: Record<string, SchemaField>; required?: string[] };
 
     const errors = validateForm(
       {

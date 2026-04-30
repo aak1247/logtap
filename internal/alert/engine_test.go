@@ -74,7 +74,7 @@ func TestEngine_ThresholdAndBackoff(t *testing.T) {
 	}
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	e := NewEngine(db)
+	e := NewEngine(db, nil)
 	e.Now = func() time.Time { return now }
 
 	in := Input{ProjectID: 1, Source: SourceLogs, Timestamp: now, Level: "error", Message: "boom!", Fields: map[string]any{}}
@@ -147,7 +147,7 @@ func TestEngine_WindowExpiryResetsBackoff(t *testing.T) {
 	}
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	e := NewEngine(db)
+	e := NewEngine(db, nil)
 	e.Now = func() time.Time { return now }
 
 	in := Input{ProjectID: 1, Source: SourceLogs, Timestamp: now, Level: "error", Message: "boom!", Fields: map[string]any{}}
@@ -203,7 +203,7 @@ func TestEngine_EvaluateSignal_RoutesThroughExistingTargets(t *testing.T) {
 		t.Fatalf("create rule: %v", err)
 	}
 
-	e := NewEngine(db)
+	e := NewEngine(db, nil)
 	sig := detector.Signal{
 		ProjectID:  1,
 		Source:     "logs",

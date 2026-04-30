@@ -14,13 +14,15 @@ import (
 	"github.com/aak1247/logtap/internal/obs"
 	"github.com/aak1247/logtap/internal/openapi"
 	"github.com/aak1247/logtap/internal/query"
+	"github.com/aak1247/logtap/internal/search"
+	searchpostgres "github.com/aak1247/logtap/internal/search/adapters/postgres"
 	"github.com/aak1247/logtap/internal/queue"
 	"github.com/gin-gonic/gin"
 	swgui "github.com/swaggest/swgui/v3"
 	"gorm.io/gorm"
 )
 
-func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *metrics.RedisRecorder, stats *obs.Stats, detectorService *detector.Service) *http.Server {
+func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *metrics.RedisRecorder, stats *obs.Stats, detectorService *detector.Service, detectorStore *detector.ResultStore) *http.Server {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
@@ -75,6 +77,8 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 		}
 		authed.GET("/plugins/detectors", query.ListDetectorsHandler(detectorService))
 		authed.GET("/plugins/detectors/:detectorType/schema", query.GetDetectorSchemaHandler(detectorService))
+		authed.GET("/plugins/detectors/:detectorType/health", query.DetectorHealthHandler(detectorService))
+		authed.GET("/plugins/detectors/:detectorType/aggregate", query.DetectorAggregateHandler(detectorService, detectorStore))
 		authed.GET("/projects", query.ListProjectsHandler(db))
 		authed.POST("/projects", query.CreateProjectHandler(db))
 		authed.GET("/projects/:projectId", query.GetProjectHandler(db))
@@ -122,6 +126,11 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 			queryAPI.POST("/events/schema", query.CreateEventDefinitionHandler(db))
 			queryAPI.PUT("/events/schema/:eventName", query.UpdateEventDefinitionHandler(db))
 			queryAPI.GET("/logs/search", query.SearchLogsHandler(db))
+			// Unified search endpoint (v1: queries logs table via adapter)
+			if db != nil {
+				searchEngine := search.NewEngine(searchpostgres.NewAdapter(db))
+				queryAPI.GET("/search", search.SearchHandler(searchEngine))
+			}
 			queryAPI.DELETE("/logs/cleanup", query.CleanupLogsHandler(db))
 			queryAPI.DELETE("/events/cleanup", query.CleanupEventsHandler(db))
 			queryAPI.GET("/storage/estimate", query.StorageEstimateHandler(db))

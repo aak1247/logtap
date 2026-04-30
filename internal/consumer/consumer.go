@@ -45,12 +45,12 @@ func NewNSQEventConsumer(ctx context.Context, cfg config.Config, db *gorm.DB, re
 	return c, nil
 }
 
-func NewNSQLogConsumer(ctx context.Context, cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder, stats *obs.Stats) (*NSQConsumer, error) {
+func NewNSQLogConsumer(ctx context.Context, cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder, geoip *enrich.GeoIP, stats *obs.Stats) (*NSQConsumer, error) {
 	channel := cfg.NSQLogChannel
 	if channel == "" {
 		channel = "log-consumer"
 	}
-	handler, cleanup := handleLogMessage(cfg, db, recorder, stats)
+	handler, cleanup := handleLogMessage(cfg, db, recorder, geoip, stats)
 	c, err := newConsumer(ctx, cfg, "logs", channel, cfg.NSQLogConcurrency, handler)
 	if err != nil {
 		if cleanup != nil {
@@ -139,7 +139,7 @@ func connectToNSQDWithRetry(ctx context.Context, cons *nsq.Consumer, addr, topic
 func handleEventMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder, geoip *enrich.GeoIP, stats *obs.Stats) (nsq.HandlerFunc, func()) {
 	var eng *alert.Engine
 	if db != nil {
-		eng = alert.NewEngine(db)
+		eng = alert.NewEngine(db, nil)
 	}
 
 	batcher := NewBatcher[model.Event](cfg.DBEventBatchSize, cfg.DBEventFlushInterval, 5*time.Second, func(ctx context.Context, rows []model.Event) error {
@@ -249,10 +249,10 @@ func handleEventMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisR
 	}), batcher.Close
 }
 
-func handleLogMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder, stats *obs.Stats) (nsq.HandlerFunc, func()) {
+func handleLogMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisRecorder, geoip *enrich.GeoIP, stats *obs.Stats) (nsq.HandlerFunc, func()) {
 	var eng *alert.Engine
 	if db != nil {
-		eng = alert.NewEngine(db)
+		eng = alert.NewEngine(db, nil)
 	}
 
 	batcher := NewBatcher[model.Log](cfg.DBLogBatchSize, cfg.DBLogFlushInterval, 5*time.Second, func(ctx context.Context, rows []model.Log) error {
@@ -327,6 +327,17 @@ func handleLogMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisRec
 			metricsCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			recorder.ObserveLog(metricsCtx, row.ProjectID, row.Level, row.DistinctID, row.DeviceID, row.Timestamp)
+			if geoip != nil && msg.Meta != nil && msg.Meta.ClientIP != "" {
+				if g, ok := geoip.Lookup(msg.Meta.ClientIP); ok {
+					dims := map[string]string{
+						"country": g.Country,
+						"region":  g.Region,
+						"city":    g.City,
+						"asn_org": g.ASNOrg,
+					}
+					recorder.ObserveEventDist(metricsCtx, row.ProjectID, row.Timestamp, dims)
+				}
+			}
 		}
 		if stats != nil {
 			stats.ObserveConsumerMessage(time.Since(msgStart), nil)

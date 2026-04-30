@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aak1247/logtap/internal/channel"
 	"github.com/aak1247/logtap/internal/config"
 	"github.com/aak1247/logtap/internal/model"
 	"github.com/google/uuid"
@@ -30,6 +31,7 @@ type Worker struct {
 	HTTPClient *http.Client
 	Now        func() time.Time
 	Config     config.Config
+	ChannelSvc *channel.Service // optional; when set, supports plugin-based channels
 }
 
 func NewWorker(db *gorm.DB, cfg config.Config) *Worker {
@@ -348,6 +350,21 @@ func backoffDelay(attempt int) time.Duration {
 }
 
 func (w *Worker) send(ctx context.Context, d model.AlertDelivery) error {
+	// Try plugin-based channel first.
+	if w.ChannelSvc != nil {
+		p, ok := w.ChannelSvc.Registry.Get(d.ChannelType)
+		if ok {
+			msg := channel.Message{
+				ProjectID: d.ProjectID,
+				RuleID:    d.RuleID,
+				Title:     d.Title,
+				Content:   d.Content,
+			}
+			cfg := json.RawMessage(d.Target)
+			return p.Send(ctx, msg, cfg)
+		}
+	}
+	// Fall back to legacy senders.
 	switch d.ChannelType {
 	case "wecom":
 		return w.sendWecom(ctx, d.Target, d.Title, d.Content)

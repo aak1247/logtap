@@ -93,9 +93,10 @@ func newTestServer(t *testing.T) *httptest.Server {
 	publisher := &testPublisher{db: db}
 	reg := detector.NewRegistry()
 	_ = reg.RegisterStatic(logbasic.New())
-	detectorService := detector.NewService(reg)
+	var resultStore *detector.ResultStore
+	detectorService := detector.NewService(reg, resultStore)
 
-	srv := httpserver.New(cfg, publisher, db, nil, nil, detectorService)
+	srv := httpserver.New(cfg, publisher, db, nil, nil, detectorService, resultStore)
 	ts := httptest.NewServer(srv.Handler)
 	t.Cleanup(ts.Close)
 	return ts

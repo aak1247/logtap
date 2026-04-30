@@ -29,7 +29,7 @@ func InsertLog(ctx context.Context, db *gorm.DB, projectID string, lp ingest.Cus
 	// Best-effort alert evaluation; must not break the ingest path.
 	evalCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer cancel()
-	_ = alert.NewEngine(db).Evaluate(evalCtx, alert.InputFromLog(row))
+	_ = alert.NewEngine(db, nil).Evaluate(evalCtx, alert.InputFromLog(row))
 	return nil
 }
 

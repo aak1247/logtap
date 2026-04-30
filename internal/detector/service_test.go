@@ -14,7 +14,7 @@ func TestService_ListSchemaValidateAndExecute(t *testing.T) {
 	if err := reg.RegisterStatic(stubPlugin{typ: "http_check"}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	svc := NewService(reg)
+	svc := NewService(reg, nil)
 
 	items, err := svc.ListDescriptors()
 	if err != nil {
@@ -51,12 +51,12 @@ func TestService_ListSchemaValidateAndExecute(t *testing.T) {
 func TestService_Errors(t *testing.T) {
 	t.Parallel()
 
-	svc := NewService(nil)
+	svc := NewService(nil, nil)
 	if _, err := svc.ListDescriptors(); !errors.Is(err, ErrServiceNotConfigured) {
 		t.Fatalf("expected ErrServiceNotConfigured, got %v", err)
 	}
 	reg := NewRegistry()
-	svc = NewService(reg)
+	svc = NewService(reg, nil)
 
 	if _, err := svc.GetSchema("missing"); !errors.Is(err, ErrDetectorNotFound) {
 		t.Fatalf("expected ErrDetectorNotFound, got %v", err)
@@ -77,7 +77,7 @@ func TestService_TestExecuteElapsed(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	now := time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC)
-	svc := NewService(reg)
+	svc := NewService(reg, nil)
 	svc.Now = func() time.Time {
 		now = now.Add(5 * time.Millisecond)
 		return now

@@ -276,6 +276,88 @@ export type MonitorTestSample = {
   occurredAt: string;
 };
 
+export type ChannelDescriptor = {
+  type: string;
+  schema: unknown;
+};
+
+export type PluginHealthResponse = {
+  status: string;
+  message?: string;
+  last_check?: string;
+};
+
+export type AggregatePoint = {
+  time: string;
+  value: number;
+};
+
+export type AggregateResponse = {
+  detector_type: string;
+  interval: string;
+  points: AggregatePoint[];
+};
+
+export type SearchResult = {
+  items: LogRow[];
+  total: number;
+  facets?: Record<string, { key: string; count: number }[]>;
+};
+
+export async function listChannels(
+  s: ApiSettings,
+): Promise<{ items: ChannelDescriptor[] }> {
+  return fetchJSON(`${s.apiBase}/api/${s.projectId}/channels`, s.token);
+}
+
+export async function getDetectorHealth(
+  s: ApiSettings,
+  detectorType: string,
+): Promise<PluginHealthResponse> {
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/plugins/detectors/${encodeURIComponent(detectorType)}/health`,
+    s.token,
+  );
+}
+
+export async function getDetectorAggregate(
+  s: ApiSettings,
+  detectorType: string,
+  params: { projectId?: string; start?: string; end?: string; interval?: string },
+): Promise<AggregateResponse> {
+  const usp = new URLSearchParams();
+  if (params.projectId) usp.set("project_id", params.projectId);
+  if (params.start) usp.set("start", params.start);
+  if (params.end) usp.set("end", params.end);
+  if (params.interval) usp.set("interval", params.interval);
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/plugins/detectors/${encodeURIComponent(detectorType)}/aggregate?${usp.toString()}`,
+    s.token,
+  );
+}
+
+export async function searchUnified(
+  s: ApiSettings,
+  params: {
+    q?: string;
+    start?: string;
+    end?: string;
+    page?: number;
+    pageSize?: number;
+  },
+): Promise<SearchResult> {
+  const usp = new URLSearchParams();
+  if (params.q) usp.set("q", params.q);
+  if (params.start) usp.set("start", params.start);
+  if (params.end) usp.set("end", params.end);
+  if (params.page) usp.set("page", String(params.page));
+  if (params.pageSize) usp.set("pageSize", String(params.pageSize));
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/search?${usp.toString()}`,
+    s.token,
+  );
+}
+
 export type MonitorTestResult = {
   monitorId: number;
   detectorType: string;

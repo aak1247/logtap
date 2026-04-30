@@ -10,18 +10,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aak1247/logtap/internal/channel"
 	"github.com/aak1247/logtap/internal/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 type Engine struct {
-	DB  *gorm.DB
-	Now func() time.Time
+	DB            *gorm.DB
+	Now           func() time.Time
+	ChannelSvc    *channel.Service // optional; when set, used for new-format channels
 }
 
-func NewEngine(db *gorm.DB) *Engine {
-	return &Engine{DB: db, Now: time.Now}
+func NewEngine(db *gorm.DB, channelSvc *channel.Service) *Engine {
+	return &Engine{DB: db, Now: time.Now, ChannelSvc: channelSvc}
 }
 
 func (e *Engine) Evaluate(ctx context.Context, in Input) error {
@@ -61,6 +63,8 @@ func (e *Engine) Evaluate(ctx context.Context, in Input) error {
 		targets := RuleTargets{}
 		_ = json.Unmarshal(r.Targets, &targets)
 
+		newChannels, _ := channel.ParseChannels(json.RawMessage(r.Targets))
+
 		keyHash := computeDedupeKeyHash(r.ID, in, rep)
 
 		shouldSend, err := e.updateStateAndDecide(ctx, r.ID, keyHash, now, rep)
@@ -72,8 +76,14 @@ func (e *Engine) Evaluate(ctx context.Context, in Input) error {
 		}
 
 		title, content := formatNotification(r, in)
-		if err := e.enqueueDeliveries(ctx, r, targets, title, content, now); err != nil {
-			return err
+		if len(newChannels) > 0 {
+			if err := e.enqueueChannelDeliveries(ctx, r, newChannels, title, content, now); err != nil {
+				return err
+			}
+		} else {
+			if err := e.enqueueDeliveries(ctx, r, targets, title, content, now); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -215,6 +225,31 @@ func formatNotification(rule model.AlertRule, in Input) (title string, content s
 		}
 	}
 	return title, content
+}
+
+func (e *Engine) enqueueChannelDeliveries(ctx context.Context, rule model.AlertRule, channels []channel.ChannelConfig, title, content string, now time.Time) error {
+	if e.ChannelSvc == nil {
+		return nil
+	}
+	deliveries := make([]model.AlertDelivery, 0, len(channels))
+	for _, ch := range channels {
+		deliveries = append(deliveries, model.AlertDelivery{
+			ProjectID:     rule.ProjectID,
+			RuleID:        rule.ID,
+			ChannelType:   ch.Type,
+			Target:        string(ch.Config),
+			Title:         title,
+			Content:       content,
+			Status:        "pending",
+			Attempts:      0,
+			NextAttemptAt: now,
+		})
+	}
+	if len(deliveries) == 0 {
+		return nil
+	}
+	engineEnqueuedTotal.Add(int64(len(deliveries)))
+	return e.DB.WithContext(ctx).Create(&deliveries).Error
 }
 
 func (e *Engine) enqueueDeliveries(ctx context.Context, rule model.AlertRule, targets RuleTargets, title, content string, now time.Time) error {

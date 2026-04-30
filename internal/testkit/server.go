@@ -38,9 +38,9 @@ func NewServer(t testing.TB) *Server {
 	publisher := &InlinePublisher{DB: db}
 	reg := detector.NewRegistry()
 	_ = reg.RegisterStatic(logbasic.New())
-	detectorService := detector.NewService(reg)
+	detectorService := detector.NewService(reg, nil)
 
-	srv := httpserver.New(cfg, publisher, db, nil, nil, detectorService)
+	srv := httpserver.New(cfg, publisher, db, nil, nil, detectorService, nil)
 	ts := httptest.NewServer(srv.Handler)
 	t.Cleanup(ts.Close)
 

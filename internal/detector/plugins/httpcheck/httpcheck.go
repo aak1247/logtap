@@ -20,6 +20,10 @@ func New() Plugin { return Plugin{} }
 
 func (Plugin) Type() string { return "http_check" }
 
+// Compile-time interface checks.
+var _ detector.AggregatablePlugin = Plugin{}
+var _ detector.ResultStorePlugin = Plugin{}
+
 // ConfigSchema returns a simple JSON schema describing http_check config.
 // The schema is intentionally small to keep frontend integration simple.
 func (Plugin) ConfigSchema() json.RawMessage {
@@ -255,4 +259,39 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max]
+}
+
+// StoreResults persists http_check results via the generic ResultStore.
+func (Plugin) StoreResults(ctx context.Context, projectID int, results []detector.TypedResult) error {
+	return nil // Storage is handled by the worker via detector.ResultStore
+}
+
+// QueryResults retrieves http_check results.
+func (Plugin) QueryResults(ctx context.Context, projectID int, query detector.ResultQuery) ([]detector.TypedResult, error) {
+	return nil, nil // Querying is handled by the worker via detector.ResultStore
+}
+
+// Aggregate returns time-series metrics for http_check results.
+// It requires the ResultStore to be available via context or a shared reference.
+// For now, this returns an error indicating the store is not wired directly.
+func (Plugin) Aggregate(ctx context.Context, projectID int, tr detector.TimeRange, interval detector.AggregateInterval) ([]detector.MetricPoint, error) {
+	// The actual aggregation is done via detector.ResultStore methods.
+	// This method serves as the plugin-level entry point called by the service.
+	return nil, fmt.Errorf("http_check Aggregate: use ResultStore.AggregateAvgFloat/AggregateSuccessRate directly")
+}
+
+// AggregateWithStore performs http_check aggregation using the provided store.
+func AggregateWithStore(ctx context.Context, store *detector.ResultStore, projectID int, tr detector.TimeRange, interval detector.AggregateInterval) (map[string][]detector.MetricPoint, error) {
+	elapsed, err := store.AggregateAvgFloat(ctx, "http_check", projectID, "elapsed_ms", tr, interval)
+	if err != nil {
+		return nil, err
+	}
+	success, err := store.AggregateSuccessRate(ctx, "http_check", projectID, tr, interval)
+	if err != nil {
+		return nil, err
+	}
+	return map[string][]detector.MetricPoint{
+		"elapsed_ms":   elapsed,
+		"success_rate": success,
+	}, nil
 }

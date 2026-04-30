@@ -987,7 +987,7 @@ func TestAlertRulesHandler(db *gorm.DB) gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
 
-		eng := alert.NewEngine(db)
+		eng := alert.NewEngine(db, nil)
 		items, err := eng.EvaluatePreview(ctx, in)
 		if err != nil {
 			respondErr(c, http.StatusServiceUnavailable, err.Error())
@@ -1476,7 +1476,7 @@ func TestAlertRulesDeliveriesHandler(db *gorm.DB) gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
 
-		eng := alert.NewEngine(db)
+		eng := alert.NewEngine(db, nil)
 		previews, err := eng.EvaluatePreview(ctx, in)
 		if err != nil {
 			respondErr(c, http.StatusServiceUnavailable, err.Error())

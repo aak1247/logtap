@@ -97,7 +97,7 @@ func newProxySecretServer(t *testing.T, secret string) *httptest.Server {
 		LogtapProxySecret: secret,
 	}
 
-	srv := httpserver.New(cfg, publisher, db, nil, nil, nil)
+	srv := httpserver.New(cfg, publisher, db, nil, nil, nil, nil)
 	ts := httptest.NewServer(srv.Handler)
 	t.Cleanup(ts.Close)
 	return ts

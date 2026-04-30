@@ -14,14 +14,18 @@ import (
 	"time"
 
 	"github.com/aak1247/logtap/internal/alert"
+	"github.com/aak1247/logtap/internal/channel"
+	"github.com/aak1247/logtap/internal/channel/builtin"
 	"github.com/aak1247/logtap/internal/cleanup"
 	"github.com/aak1247/logtap/internal/config"
 	"github.com/aak1247/logtap/internal/consumer"
 	"github.com/aak1247/logtap/internal/db"
 	"github.com/aak1247/logtap/internal/detector"
+	"github.com/aak1247/logtap/internal/detector/plugins/dnscheck"
 	"github.com/aak1247/logtap/internal/detector/plugins/httpcheck"
 	"github.com/aak1247/logtap/internal/detector/plugins/logbasic"
 	"github.com/aak1247/logtap/internal/detector/plugins/metricthreshold"
+	"github.com/aak1247/logtap/internal/detector/plugins/sslcheck"
 	"github.com/aak1247/logtap/internal/detector/plugins/tcpcheck"
 	"github.com/aak1247/logtap/internal/enrich"
 	"github.com/aak1247/logtap/internal/httpserver"
@@ -110,7 +114,21 @@ func main() {
 		defer geoip.Close()
 	}
 
+	channelReg, channelSvc, err := channel.Bootstrap(cfg)
+	if err != nil {
+		log.Fatalf("channel bootstrap: %v", err)
+	}
+	if err := builtin.RegisterAll(channelReg, cfg); err != nil {
+		log.Fatalf("channel register builtins: %v", err)
+	}
+
 	detectorRegistry := detector.NewRegistry()
+	detectorStore := detector.NewResultStore(gdb)
+	if gdb != nil {
+		if err := detectorStore.AutoMigrate(ctx); err != nil {
+			log.Printf("detector store migrate: %v", err)
+		}
+	}
 	if err := detectorRegistry.RegisterStatic(logbasic.New()); err != nil {
 		log.Printf("detector register static log_basic: %v", err)
 	}
@@ -122,6 +140,12 @@ func main() {
 	}
 	if err := detectorRegistry.RegisterStatic(metricthreshold.New()); err != nil {
 		log.Printf("detector register static metric_threshold: %v", err)
+	}
+	if err := detectorRegistry.RegisterStatic(dnscheck.New()); err != nil {
+		log.Printf("detector register static dns_check: %v", err)
+	}
+	if err := detectorRegistry.RegisterStatic(sslcheck.New()); err != nil {
+		log.Printf("detector register static ssl_check: %v", err)
 	}
 	dynamicLoaded := 0
 	dynamicFailed := 0
@@ -148,9 +172,9 @@ func main() {
 		}
 	}
 	log.Printf("detector registry initialized: total=%d dynamic_loaded=%d dynamic_failed=%d", len(detectorRegistry.List()), dynamicLoaded, dynamicFailed)
-	detectorService := detector.NewService(detectorRegistry)
+	detectorService := detector.NewService(detectorRegistry, detectorStore)
 
-	srv := httpserver.New(cfg, publisher, gdb, recorder, stats, detectorService)
+	srv := httpserver.New(cfg, publisher, gdb, recorder, stats, detectorService, detectorStore)
 
 	var eventConsumer *consumer.NSQConsumer
 	var logConsumer *consumer.NSQConsumer
@@ -162,7 +186,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("event consumer: %v", err)
 		}
-		logConsumer, err = consumer.NewNSQLogConsumer(ctx, cfg, gdb, recorder, stats)
+		logConsumer, err = consumer.NewNSQLogConsumer(ctx, cfg, gdb, recorder, geoip, stats)
 		if err != nil {
 			log.Fatalf("log consumer: %v", err)
 		}
@@ -182,6 +206,7 @@ func main() {
 
 	if gdb != nil && cfg.RunAlertWorker {
 		aw := alert.NewWorker(gdb, cfg)
+		aw.ChannelSvc = channelSvc
 		go func() {
 			_ = aw.Run(ctx)
 		}()
@@ -190,6 +215,7 @@ func main() {
 
 	if gdb != nil && cfg.RunMonitorWorker {
 		mw := monitor.NewWorker(gdb, detectorRegistry)
+		mw.Store = detectorStore
 		mw.TickInterval = cfg.MonitorTickInterval
 		mw.BatchSize = cfg.MonitorBatchSize
 		mw.LeaseDuration = cfg.MonitorLeaseDuration

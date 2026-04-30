@@ -44,9 +44,9 @@ func main() {
 	if err := reg.RegisterStatic(logbasic.New()); err != nil {
 		log.Fatalf("register static detector: %v", err)
 	}
-	detectorService := detector.NewService(reg)
+	detectorService := detector.NewService(reg, nil)
 
-	srv := httpserver.New(cfg, publisher, db, nil, nil, detectorService)
+	srv := httpserver.New(cfg, publisher, db, nil, nil, detectorService, nil)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
