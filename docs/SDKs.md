@@ -47,9 +47,7 @@ await client.close();
 
 ### 安装
 
-```bash
-go get github.com/aak1247/logtap/sdks/go/logtap
-```
+暂未发布到公共代理，推荐 `go.mod replace` 或直接复制源码，详见 `sdks/go/logtap/README.md`。
 
 ```go
 client, err := logtap.NewClient(logtap.ClientOptions{
