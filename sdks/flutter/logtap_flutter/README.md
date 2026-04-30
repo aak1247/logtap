@@ -4,26 +4,8 @@
 
 ## 安装
 
-Flutter SDK 暂未发布到 pub.dev（`publish_to: none`），推荐以下方式引入：
-
-**方式一：git 依赖（推荐）**
-
-```yaml
-# pubspec.yaml
-dependencies:
-  logtap_flutter:
-    git:
-      url: https://github.com/aak1247/logtap.git
-      path: sdks/flutter/logtap_flutter
-```
-
-**方式二：本地路径引用**
-
-```yaml
-# pubspec.yaml
-dependencies:
-  logtap_flutter:
-    path: /path/to/logtap-mono/logtap/sdks/flutter/logtap_flutter
+```bash
+flutter pub add logtap_flutter
 ```
 
 ## 使用

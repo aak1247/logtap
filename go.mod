@@ -1,8 +1,9 @@
 module github.com/aak1247/logtap
 
-go 1.22
+go 1.26.1
 
 require (
+	github.com/aak1247/logtap-go v0.0.0-00010101000000-000000000000
 	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/gin-gonic/gin v1.10.1
 	github.com/glebarez/sqlite v1.11.0
@@ -73,3 +74,5 @@ require (
 	modernc.org/memory v1.5.0 // indirect
 	modernc.org/sqlite v1.23.1 // indirect
 )
+
+replace github.com/aak1247/logtap-go => ./sdks/go/logtap

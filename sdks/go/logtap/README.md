@@ -4,31 +4,15 @@
 
 ## 安装
 
-Go SDK 目前以源码形式提供，暂未发布到公共代理。推荐以下方式引入：
-
-**方式一：go.mod replace（开发阶段）**
-
 ```bash
-go get github.com/aak1247/logtap/sdks/go/logtap@latest
+go get github.com/aak1247/logtap-go
 ```
-
-如果 go proxy 拉不到，在 `go.mod` 中添加 replace：
-
-```
-module your-project
-
-go 1.22
-
-require github.com/aak1247/logtap/sdks/go/logtap v0.0.0
-
-replace github.com/aak1247/logtap/sdks/go/logtap => /path/to/logtap-mono/logtap/sdks/go/logtap
-```
-
-**方式二：直接复制源码**
-
-将 `sdks/go/logtap/` 目录复制到你的项目中，直接 import 本地包。
 
 ## 导入
+
+```go
+import logtap "github.com/aak1247/logtap-go"
+```
 
 ```go
 import "github.com/aak1247/logtap/sdks/go/logtap"

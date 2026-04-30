@@ -43,11 +43,13 @@ await client.close();
 
 ## Go SDK
 
-目录：`sdks/go/logtap/`（包：`github.com/aak1247/logtap/sdks/go/logtap`）
+目录：`sdks/go/logtap/`（包：`github.com/aak1247/logtap-go`）
 
 ### 安装
 
-暂未发布到公共代理，推荐 `go.mod replace` 或直接复制源码，详见 `sdks/go/logtap/README.md`。
+```bash
+go get github.com/aak1247/logtap-go
+```
 
 ```go
 client, err := logtap.NewClient(logtap.ClientOptions{
