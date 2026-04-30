@@ -13,7 +13,7 @@
 
 ```go
 client, err := logtap.NewClient(logtap.ClientOptions{
-  BaseURL:    "http://localhost:8080",
+  BaseURL:    "{{baseUrl}}",
   ProjectID:  1,
   ProjectKey: "pk_xxx", // 开启 AUTH_SECRET 时必填
   Gzip:       true,
@@ -41,7 +41,7 @@ payload := map[string]any{
 }
 
 b, _ := json.Marshal(payload)
-req, _ := http.NewRequest("POST", "http://localhost:8080/api/1/logs/", bytes.NewReader(b))
+req, _ := http.NewRequest("POST", "{{baseUrl}}/api/1/logs/", bytes.NewReader(b))
 req.Header.Set("Content-Type", "application/json")
 req.Header.Set("X-Project-Key", "pk_xxx")
 
@@ -64,7 +64,7 @@ payload := map[string]any{
 }
 
 b, _ := json.Marshal(payload)
-req, _ := http.NewRequest("POST", "http://localhost:8080/api/1/track/", bytes.NewReader(b))
+req, _ := http.NewRequest("POST", "{{baseUrl}}/api/1/track/", bytes.NewReader(b))
 req.Header.Set("Content-Type", "application/json")
 req.Header.Set("X-Project-Key", "pk_xxx")
 

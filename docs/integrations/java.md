@@ -25,7 +25,7 @@ OkHttpClient client = new OkHttpClient();
 String json = "{\"level\":\"info\",\"message\":\"hello\",\"user\":{\"id\":\"u1\"},\"fields\":{\"k\":\"v\"}}";
 
 Request req = new Request.Builder()
-  .url("http://localhost:8080/api/1/logs/")
+  .url("{{baseUrl}}/api/1/logs/")
   .post(RequestBody.create(json, MediaType.parse("application/json")))
   .addHeader("Content-Type", "application/json")
   .addHeader("X-Project-Key", "pk_xxx")
@@ -45,7 +45,7 @@ OkHttpClient client = new OkHttpClient();
 String json = "{\"name\":\"signup\",\"user\":{\"id\":\"u1\"},\"properties\":{\"plan\":\"pro\"}}";
 
 Request req = new Request.Builder()
-  .url("http://localhost:8080/api/1/track/")
+  .url("{{baseUrl}}/api/1/track/")
   .post(RequestBody.create(json, MediaType.parse("application/json")))
   .addHeader("Content-Type", "application/json")
   .addHeader("X-Project-Key", "pk_xxx")

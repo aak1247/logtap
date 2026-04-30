@@ -14,7 +14,7 @@ npm install logtap-sdk
 import { LogtapClient } from "logtap-sdk";
 
 const client = new LogtapClient({
-  baseUrl: "http://localhost:8080",
+  baseUrl: "https://your-logtap-instance.example.com",
   projectId: 1,
   projectKey: "pk_xxx", // 启用 AUTH_SECRET 时必填
   gzip: true, // 浏览器需要支持 CompressionStream；否则会自动降级为非 gzip

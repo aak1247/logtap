@@ -7,7 +7,7 @@ logtap 提供三端上报 SDK，用于向网关上报「结构化日志」与「
 
 ## 共同配置
 
-- `baseUrl`：例如 `http://localhost:8080`
+- `baseUrl`：例如 `{{baseUrl}}`
 - `projectId`：项目 ID
 - `projectKey`：启用 `AUTH_SECRET` 时必填（`X-Project-Key: pk_...`）
 - `gzip`：可选（SDK 会在不支持的平台自动降级）
@@ -20,7 +20,7 @@ logtap 提供三端上报 SDK，用于向网关上报「结构化日志」与「
 import { LogtapClient } from "logtap-sdk";
 
 const client = new LogtapClient({
-  baseUrl: "http://localhost:8080",
+  baseUrl: "{{baseUrl}}",
   projectId: 1,
   projectKey: "pk_xxx",
   gzip: true,
@@ -53,7 +53,7 @@ go get github.com/aak1247/logtap/sdks/go/logtap
 
 ```go
 client, err := logtap.NewClient(logtap.ClientOptions{
-  BaseURL:    "http://localhost:8080",
+  BaseURL:    "{{baseUrl}}",
   ProjectID:  1,
   ProjectKey: "pk_xxx",
   Gzip:       true,
@@ -80,7 +80,7 @@ client.Track("signup", map[string]any{"from": "landing"}, nil)
 ```dart
 final client = await LogtapClient.create(
   const LogtapClientOptions(
-    baseUrl: "http://localhost:8080",
+    baseUrl: "{{baseUrl}}",
     projectId: 1,
     projectKey: "pk_xxx",
     gzip: true, // Web 自动降级为非 gzip

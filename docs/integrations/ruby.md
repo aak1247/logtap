@@ -14,7 +14,7 @@ Ruby 端目前没有内置 SDK，推荐按 `INGEST.md` 的接口用 `net/http` /
 require "net/http"
 require "json"
 
-base_url = "http://localhost:8080"
+base_url = "{{baseUrl}}"
 project_id = 1
 project_key = "pk_xxx" # 开启 AUTH_SECRET 时必填
 
@@ -42,7 +42,7 @@ end
 require "net/http"
 require "json"
 
-base_url = "http://localhost:8080"
+base_url = "{{baseUrl}}"
 project_id = 1
 project_key = "pk_xxx"
 

@@ -22,7 +22,7 @@ import "github.com/aak1247/logtap/sdks/go/logtap"
 
 ```go
 client, err := logtap.NewClient(logtap.ClientOptions{
-  BaseURL:    "http://localhost:8080",
+  BaseURL:    "https://your-logtap-instance.example.com",
   ProjectID:  1,
   ProjectKey: "pk_xxx", // 启用 AUTH_SECRET 时必填
   Gzip:       true,
@@ -51,7 +51,7 @@ _ = client.Flush(context.Background())
 
 ```go
 client, _ := logtap.NewClient(logtap.ClientOptions{
-  BaseURL:      "http://localhost:8080",
+  BaseURL:      "https://your-logtap-instance.example.com",
   ProjectID:    1,
   ProjectKey:   "pk_xxx",
   PersistQueue: true,

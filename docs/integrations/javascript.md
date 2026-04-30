@@ -25,7 +25,7 @@ npm i logtap-sdk
 import { LogtapClient } from "logtap-sdk";
 
 const client = new LogtapClient({
-  baseUrl: "http://localhost:8080",
+  baseUrl: "{{baseUrl}}",
   projectId: 1,
   projectKey: "pk_xxx", // 开启 AUTH_SECRET 时必填
   gzip: true,
@@ -47,7 +47,7 @@ client.track("signup", { plan: "pro" });
 ### 2.1 结构化日志
 
 ```ts
-await fetch("http://localhost:8080/api/1/logs/", {
+await fetch("{{baseUrl}}/api/1/logs/", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -66,7 +66,7 @@ await fetch("http://localhost:8080/api/1/logs/", {
 同一路径也支持批量（JSON 数组），返回同样是 `202 Accepted`：
 
 ```ts
-await fetch("http://localhost:8080/api/1/logs/", {
+await fetch("{{baseUrl}}/api/1/logs/", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -82,7 +82,7 @@ await fetch("http://localhost:8080/api/1/logs/", {
 ### 2.2 埋点/事件
 
 ```ts
-await fetch("http://localhost:8080/api/1/track/", {
+await fetch("{{baseUrl}}/api/1/track/", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -99,7 +99,7 @@ await fetch("http://localhost:8080/api/1/track/", {
 同一路径也支持批量（JSON 数组）：
 
 ```ts
-await fetch("http://localhost:8080/api/1/track/", {
+await fetch("{{baseUrl}}/api/1/track/", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",

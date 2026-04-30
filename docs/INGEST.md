@@ -4,7 +4,7 @@ logtap 的客户端 SDK（Browser/Node、Go、Flutter）统一使用如下 HTTP 
 
 ## 基本约定
 
-- Base URL：例如 `http://localhost:8080`
+- Base URL：例如 `{{baseUrl}}`
 - Project ID：项目 ID（控制台项目页可见），作为路径参数：`/api/:projectId/...`
 - 鉴权（推荐开启 `AUTH_SECRET`）：
   - 上报必须携带项目 Key：`X-Project-Key: pk_...`

@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { Link, NavLink, useParams } from "react-router-dom";
 import { Markdown } from "../components/Markdown";
 import { findDoc, groupedDocs } from "../docs/registry";
+import { loadSettings } from "../lib/storage";
 
 export function DocsPage() {
   const params = useParams();
@@ -68,7 +69,7 @@ export function DocsPage() {
         </aside>
 
         <section className="rounded-xl border border-zinc-900 bg-zinc-950/40 p-5">
-          <Markdown content={doc.content} />
+          <Markdown content={doc.content.replace(/\{\{baseUrl\}\}/g, loadSettings().apiBase || "http://localhost:8080")} />
         </section>
       </main>
     </div>

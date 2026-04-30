@@ -19,7 +19,7 @@ pip install requests
 ```py
 import requests
 
-base_url = "http://localhost:8080"
+base_url = "{{baseUrl}}"
 project_id = 1
 project_key = "pk_xxx"  # 开启 AUTH_SECRET 时必填
 

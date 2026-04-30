@@ -14,7 +14,7 @@
 ```dart
 final client = await LogtapClient.create(
   const LogtapClientOptions(
-    baseUrl: "http://localhost:8080",
+    baseUrl: "{{baseUrl}}",
     projectId: 1,
     projectKey: "pk_xxx", // 开启 AUTH_SECRET 时必填
     gzip: true, // Web 自动降级为非 gzip

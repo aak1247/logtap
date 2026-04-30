@@ -24,7 +24,7 @@ var payload = new
   fields = new { k = "v" },
 };
 
-var req = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8080/api/1/logs/");
+var req = new HttpRequestMessage(HttpMethod.Post, "{{baseUrl}}/api/1/logs/");
 req.Headers.Add("X-Project-Key", "pk_xxx");
 req.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
@@ -43,7 +43,7 @@ var payload = new
   properties = new { plan = "pro" },
 };
 
-var req = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8080/api/1/track/");
+var req = new HttpRequestMessage(HttpMethod.Post, "{{baseUrl}}/api/1/track/");
 req.Headers.Add("X-Project-Key", "pk_xxx");
 req.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 

@@ -13,7 +13,7 @@ PHP 端目前没有内置 SDK，推荐用 cURL 或你熟悉的 HTTP 客户端按
 ```php
 <?php
 
-$baseUrl = "http://localhost:8080";
+$baseUrl = "{{baseUrl}}";
 $projectId = 1;
 $projectKey = "pk_xxx"; // 开启 AUTH_SECRET 时必填
 
@@ -44,7 +44,7 @@ curl_close($ch);
 ```php
 <?php
 
-$baseUrl = "http://localhost:8080";
+$baseUrl = "{{baseUrl}}";
 $projectId = 1;
 $projectKey = "pk_xxx";
 

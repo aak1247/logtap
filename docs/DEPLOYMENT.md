@@ -30,7 +30,7 @@ docker compose up --build
 
 启动后：
 
-- 网关：`http://localhost:8080`
+- 网关：`{{baseUrl}}`
 - NSQ Admin：`http://localhost:4171`
 - Postgres：`localhost:5432`（默认库：`logtap`）
 
