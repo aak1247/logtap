@@ -74,21 +74,20 @@ func AutoMigrate(ctx context.Context, db *gorm.DB, opts Options) error {
 		return err
 	}
 
-	// Idempotency for logs: dedupe retries by a stable ingest_id (e.g. NSQ message id).
-	if err := gdb.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_dedupe ON logs (project_id, ingest_id)`).Error; err != nil {
-		return err
-	}
-
-	// Idempotency for track events: derived from logs, keyed by ingest_id.
-	if err := gdb.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_track_events_dedupe ON track_events (project_id, ingest_id)`).Error; err != nil {
-		return err
-	}
-
 	if err := gdb.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_project_keys_project_name ON project_keys (project_id, name)`).Error; err != nil {
 		return err
 	}
 
 	if strings.EqualFold(db.Dialector.Name(), "postgres") {
+		if err := ensureTimescaleCompatiblePrimaryKeys(gdb); err != nil {
+			return err
+		}
+		if err := ensureTimescaleCompatibleUniqueIndex(gdb, "logs", "idx_logs_dedupe", []string{"project_id", "ingest_id", "timestamp"}); err != nil {
+			return err
+		}
+		if err := ensureTimescaleCompatibleUniqueIndex(gdb, "track_events", "idx_track_events_dedupe", []string{"project_id", "ingest_id", "timestamp"}); err != nil {
+			return err
+		}
 		if err := ensureTimescaleHypertables(gdb, opts.RequireTimescale, timescaleInstalled); err != nil {
 			return err
 		}
@@ -154,20 +153,104 @@ func ensureTimescaleHypertables(db *gorm.DB, require bool, timescaleInstalled bo
 	}
 
 	// Make hypertables if possible (idempotent).
-	if err := db.Exec(`SELECT create_hypertable('events', 'timestamp', if_not_exists => TRUE)`).Error; err != nil {
+	if err := db.Exec(`SELECT create_hypertable('events', 'timestamp', if_not_exists => TRUE, migrate_data => TRUE)`).Error; err != nil {
 		if require {
 			return fmt.Errorf("create_hypertable events: %w", err)
 		}
 	}
-	if err := db.Exec(`SELECT create_hypertable('logs', 'timestamp', if_not_exists => TRUE)`).Error; err != nil {
+	if err := db.Exec(`SELECT create_hypertable('logs', 'timestamp', if_not_exists => TRUE, migrate_data => TRUE)`).Error; err != nil {
 		if require {
 			return fmt.Errorf("create_hypertable logs: %w", err)
 		}
 	}
-	if err := db.Exec(`SELECT create_hypertable('track_events', 'timestamp', if_not_exists => TRUE)`).Error; err != nil {
+	if err := db.Exec(`SELECT create_hypertable('track_events', 'timestamp', if_not_exists => TRUE, migrate_data => TRUE)`).Error; err != nil {
 		if require {
 			return fmt.Errorf("create_hypertable track_events: %w", err)
 		}
 	}
 	return nil
+}
+
+func ensureTimescaleCompatiblePrimaryKeys(db *gorm.DB) error {
+	if db == nil {
+		return gorm.ErrInvalidDB
+	}
+	definitions := []struct {
+		table      string
+		constraint string
+		columns    []string
+	}{
+		{table: "events", constraint: "events_pkey", columns: []string{"id", "timestamp"}},
+		{table: "logs", constraint: "logs_pkey", columns: []string{"id", "timestamp"}},
+		{table: "track_events", constraint: "track_events_pkey", columns: []string{"id", "timestamp"}},
+	}
+	for _, def := range definitions {
+		matched, err := primaryKeyMatches(db, def.table, def.constraint, def.columns)
+		if err != nil {
+			return err
+		}
+		if matched {
+			continue
+		}
+		if err := db.Exec(fmt.Sprintf(`ALTER TABLE %s DROP CONSTRAINT IF EXISTS %s`, def.table, def.constraint)).Error; err != nil {
+			return err
+		}
+		if err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD CONSTRAINT %s PRIMARY KEY (%s)`, def.table, def.constraint, strings.Join(def.columns, ", "))).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func primaryKeyMatches(db *gorm.DB, table string, constraint string, columns []string) (bool, error) {
+	var got string
+	err := db.Raw(`
+		SELECT COALESCE(array_to_string(array_agg(a.attname ORDER BY k.ord), ','), '')
+		FROM pg_constraint c
+		JOIN pg_class t ON t.oid = c.conrelid
+		JOIN unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE
+		JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+		WHERE c.contype = 'p' AND t.relname = ? AND c.conname = ?
+	`, table, constraint).Scan(&got).Error
+	if err != nil {
+		return false, err
+	}
+	return got == strings.Join(columns, ","), nil
+}
+
+func ensureTimescaleCompatibleUniqueIndex(db *gorm.DB, table string, index string, columns []string) error {
+	if db == nil {
+		return gorm.ErrInvalidDB
+	}
+	if strings.TrimSpace(table) == "" || strings.TrimSpace(index) == "" || len(columns) == 0 {
+		return errors.New("invalid unique index definition")
+	}
+	matched, err := uniqueIndexMatches(db, table, index, columns)
+	if err != nil {
+		return err
+	}
+	if matched {
+		return nil
+	}
+	if err := db.Exec(fmt.Sprintf(`DROP INDEX IF EXISTS %s`, index)).Error; err != nil {
+		return err
+	}
+	return db.Exec(fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s (%s)`, index, table, strings.Join(columns, ", "))).Error
+}
+
+func uniqueIndexMatches(db *gorm.DB, table string, index string, columns []string) (bool, error) {
+	var got string
+	err := db.Raw(`
+		SELECT COALESCE(array_to_string(array_agg(a.attname ORDER BY k.ord), ','), '')
+		FROM pg_class i
+		JOIN pg_index ix ON ix.indexrelid = i.oid
+		JOIN pg_class t ON t.oid = ix.indrelid
+		JOIN unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON k.attnum > 0
+		JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+		WHERE i.relname = ? AND t.relname = ? AND ix.indisunique
+	`, index, table).Scan(&got).Error
+	if err != nil {
+		return false, err
+	}
+	return got == strings.Join(columns, ","), nil
 }

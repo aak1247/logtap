@@ -2,7 +2,7 @@ import { useEffect, useMemo } from "react";
 import { Link, NavLink, useParams } from "react-router-dom";
 import { Markdown } from "../components/Markdown";
 import { findDoc, groupedDocs } from "../docs/registry";
-import { loadSettings } from "../lib/storage";
+import { loadSettings } from "../../lib/storage";
 
 export function DocsPage() {
   const params = useParams();

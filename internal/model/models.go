@@ -41,7 +41,7 @@ func (ProjectKey) TableName() string { return "project_keys" }
 type Event struct {
 	ID          uuid.UUID      `gorm:"type:uuid;primaryKey;column:id"`
 	ProjectID   int            `gorm:"not null;index:idx_events_project_ts,priority:1;column:project_id"`
-	Timestamp   time.Time      `gorm:"not null;index:idx_events_project_ts,priority:2,sort:desc;column:timestamp"`
+	Timestamp   time.Time      `gorm:"primaryKey;not null;index:idx_events_project_ts,priority:2,sort:desc;column:timestamp"`
 	Level       string         `gorm:"type:varchar(20);column:level"`
 	DistinctID  string         `gorm:"type:varchar(255);index;column:distinct_id"`
 	DeviceID    string         `gorm:"type:varchar(255);index;column:device_id"`
@@ -59,7 +59,7 @@ func (Event) TableName() string { return "events" }
 type Log struct {
 	ID         int64          `gorm:"primaryKey;autoIncrement;column:id"`
 	ProjectID  int            `gorm:"not null;index:idx_logs_project_ts,priority:1;index:idx_logs_dedupe,unique,priority:1;column:project_id"`
-	Timestamp  time.Time      `gorm:"not null;index:idx_logs_project_ts,priority:2,sort:desc;column:timestamp"`
+	Timestamp  time.Time      `gorm:"primaryKey;not null;index:idx_logs_project_ts,priority:2,sort:desc;index:idx_logs_dedupe,unique,priority:3;column:timestamp"`
 	IngestID   *uuid.UUID     `gorm:"type:uuid;index:idx_logs_dedupe,unique,priority:2;column:ingest_id"`
 	Level      string         `gorm:"type:varchar(20);column:level"`
 	DistinctID string         `gorm:"type:varchar(255);index;column:distinct_id"`
@@ -78,7 +78,7 @@ func (Log) TableName() string { return "logs" }
 type TrackEvent struct {
 	ID         int64      `gorm:"primaryKey;autoIncrement;column:id"`
 	ProjectID  int        `gorm:"not null;index:idx_track_events_project_ts,priority:1;index:idx_track_events_dedupe,unique,priority:1;index:idx_track_events_project_name_ts,priority:1;index:idx_track_events_project_user_ts,priority:1;column:project_id"`
-	Timestamp  time.Time  `gorm:"not null;index:idx_track_events_project_ts,priority:2,sort:desc;index:idx_track_events_project_name_ts,priority:3,sort:desc;index:idx_track_events_project_user_ts,priority:3,sort:desc;column:timestamp"`
+	Timestamp  time.Time  `gorm:"primaryKey;not null;index:idx_track_events_project_ts,priority:2,sort:desc;index:idx_track_events_dedupe,unique,priority:3;index:idx_track_events_project_name_ts,priority:3,sort:desc;index:idx_track_events_project_user_ts,priority:3,sort:desc;column:timestamp"`
 	IngestID   *uuid.UUID `gorm:"type:uuid;index:idx_track_events_dedupe,unique,priority:2;column:ingest_id"`
 	Name       string     `gorm:"type:text;not null;index:idx_track_events_project_name_ts,priority:2;column:name"`
 	DistinctID string     `gorm:"type:varchar(255);not null;index:idx_track_events_project_user_ts,priority:2;column:distinct_id"`
@@ -140,17 +140,17 @@ func (EventDefinition) TableName() string { return "event_definitions" }
 // live in logs.fields/track properties; this table only carries schema
 // metadata such as type and enum candidates.
 type PropertyDefinition struct {
-	ID           int            `gorm:"primaryKey;autoIncrement;column:id"`
-	ProjectID    int            `gorm:"not null;index;uniqueIndex:idx_property_definitions_project_key,priority:1;column:project_id"`
-	Key          string         `gorm:"type:varchar(255);not null;uniqueIndex:idx_property_definitions_project_key,priority:2;column:key"`
-	DisplayName  string         `gorm:"type:varchar(255);not null;default:'';column:display_name"`
-	Type         string         `gorm:"type:varchar(32);not null;default:'string';column:type"`
-	Description  string         `gorm:"type:text;column:description"`
-	Status       string         `gorm:"type:varchar(32);not null;default:'active';column:status"`
-	EnumValues   datatypes.JSON `gorm:"type:jsonb;column:enum_values"`
+	ID            int            `gorm:"primaryKey;autoIncrement;column:id"`
+	ProjectID     int            `gorm:"not null;index;uniqueIndex:idx_property_definitions_project_key,priority:1;column:project_id"`
+	Key           string         `gorm:"type:varchar(255);not null;uniqueIndex:idx_property_definitions_project_key,priority:2;column:key"`
+	DisplayName   string         `gorm:"type:varchar(255);not null;default:'';column:display_name"`
+	Type          string         `gorm:"type:varchar(32);not null;default:'string';column:type"`
+	Description   string         `gorm:"type:text;column:description"`
+	Status        string         `gorm:"type:varchar(32);not null;default:'active';column:status"`
+	EnumValues    datatypes.JSON `gorm:"type:jsonb;column:enum_values"`
 	ExampleValues datatypes.JSON `gorm:"type:jsonb;column:example_values"`
-	CreatedAt    time.Time      `gorm:"not null;autoCreateTime;column:created_at"`
-	UpdatedAt    time.Time      `gorm:"not null;autoUpdateTime;column:updated_at"`
+	CreatedAt     time.Time      `gorm:"not null;autoCreateTime;column:created_at"`
+	UpdatedAt     time.Time      `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
 
 func (PropertyDefinition) TableName() string { return "property_definitions" }

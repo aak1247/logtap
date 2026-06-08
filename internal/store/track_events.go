@@ -132,7 +132,7 @@ func insertTrackEventsAndRollupPostgres(ctx context.Context, db *gorm.DB, rows [
 			INSERT INTO track_events (project_id, timestamp, ingest_id, name, distinct_id, device_id)
 			SELECT project_id, timestamp, ingest_id, name, distinct_id, device_id
 			FROM input
-			ON CONFLICT (project_id, ingest_id) DO NOTHING
+			ON CONFLICT (project_id, ingest_id, timestamp) DO NOTHING
 			RETURNING project_id, timestamp, name, distinct_id
 		),
 		agg AS (

@@ -80,7 +80,7 @@ func main() {
 		}
 		defer sqlDB.Close()
 
-		migCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		migCtx, cancel := context.WithTimeout(ctx, cfg.DBMigrationTimeout)
 		if err := migrate.AutoMigrate(migCtx, gdb, migrate.Options{RequireTimescale: cfg.DBRequireTimescale}); err != nil {
 			cancel()
 			log.Fatalf("db migrate: %v", err)
