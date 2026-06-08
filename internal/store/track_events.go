@@ -65,9 +65,19 @@ func InsertLogsAndTrackEventsBatch(ctx context.Context, db *gorm.DB, logs []mode
 	if db == nil || len(logs) == 0 {
 		return nil
 	}
-	events := TrackEventRowsFromLogs(logs)
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := InsertLogsBatch(ctx, tx, logs); err != nil {
+		if err := lockLogIngestIDs(ctx, tx, logs); err != nil {
+			return err
+		}
+		newLogs, err := filterExistingLogIngestIDs(ctx, tx, logs)
+		if err != nil {
+			return err
+		}
+		if len(newLogs) == 0 {
+			return nil
+		}
+		events := TrackEventRowsFromLogs(newLogs)
+		if err := InsertLogsBatch(ctx, tx, newLogs); err != nil {
 			return err
 		}
 		if len(events) > 0 {
@@ -77,6 +87,88 @@ func InsertLogsAndTrackEventsBatch(ctx context.Context, db *gorm.DB, logs []mode
 		}
 		return nil
 	})
+}
+
+func lockLogIngestIDs(ctx context.Context, db *gorm.DB, logs []model.Log) error {
+	if db == nil || !strings.EqualFold(db.Dialector.Name(), "postgres") || len(logs) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	keys := make([]string, 0, len(logs))
+	for _, row := range logs {
+		if row.ProjectID <= 0 || row.IngestID == nil || *row.IngestID == uuid.Nil {
+			continue
+		}
+		key := fmt.Sprintf("%d:%s", row.ProjectID, row.IngestID.String())
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		keys = append(keys, key)
+	}
+	for _, key := range keys {
+		if err := db.WithContext(ctx).Exec(`SELECT pg_advisory_xact_lock(hashtextextended(?, 0))`, key).Error; err != nil {
+			return fmt.Errorf("lock log ingest id: %w", err)
+		}
+	}
+	return nil
+}
+
+func filterExistingLogIngestIDs(ctx context.Context, db *gorm.DB, logs []model.Log) ([]model.Log, error) {
+	if db == nil || len(logs) == 0 {
+		return logs, nil
+	}
+	byProject := map[int][]uuid.UUID{}
+	for _, row := range logs {
+		if row.ProjectID <= 0 || row.IngestID == nil || *row.IngestID == uuid.Nil {
+			continue
+		}
+		byProject[row.ProjectID] = append(byProject[row.ProjectID], *row.IngestID)
+	}
+	if len(byProject) == 0 {
+		return logs, nil
+	}
+
+	existingByProject := map[int]map[uuid.UUID]bool{}
+	for projectID, ingestIDs := range byProject {
+		type foundRow struct {
+			IngestID uuid.UUID `gorm:"column:ingest_id"`
+		}
+		var found []foundRow
+		if err := db.WithContext(ctx).
+			Model(&model.Log{}).
+			Select("ingest_id").
+			Where("project_id = ? AND ingest_id IN ?", projectID, ingestIDs).
+			Scan(&found).Error; err != nil {
+			return nil, fmt.Errorf("check existing logs: %w", err)
+		}
+		if len(found) == 0 {
+			continue
+		}
+		existingByProject[projectID] = map[uuid.UUID]bool{}
+		for _, row := range found {
+			existingByProject[projectID][row.IngestID] = true
+		}
+	}
+
+	filtered := make([]model.Log, 0, len(logs))
+	seenInBatch := map[int]map[uuid.UUID]bool{}
+	for _, row := range logs {
+		if row.ProjectID > 0 && row.IngestID != nil && *row.IngestID != uuid.Nil {
+			if existingByProject[row.ProjectID][*row.IngestID] {
+				continue
+			}
+			if seenInBatch[row.ProjectID] == nil {
+				seenInBatch[row.ProjectID] = map[uuid.UUID]bool{}
+			}
+			if seenInBatch[row.ProjectID][*row.IngestID] {
+				continue
+			}
+			seenInBatch[row.ProjectID][*row.IngestID] = true
+		}
+		filtered = append(filtered, row)
+	}
+	return filtered, nil
 }
 
 type trackEventJSONRow struct {

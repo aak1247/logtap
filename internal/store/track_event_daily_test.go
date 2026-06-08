@@ -145,6 +145,11 @@ func TestInsertLogsAndTrackEventsBatch_IdempotentRollup(t *testing.T) {
 	if err := InsertLogsAndTrackEventsBatch(ctx, db, []model.Log{logRow}); err != nil {
 		t.Fatalf("insert batch2: %v", err)
 	}
+	retryWithDifferentTimestamp := logRow
+	retryWithDifferentTimestamp.Timestamp = ts.Add(time.Minute)
+	if err := InsertLogsAndTrackEventsBatch(ctx, db, []model.Log{retryWithDifferentTimestamp}); err != nil {
+		t.Fatalf("insert batch3: %v", err)
+	}
 
 	var trackEvents int64
 	if err := db.WithContext(ctx).Model(&model.TrackEvent{}).Where("project_id = ?", 1).Count(&trackEvents).Error; err != nil {
