@@ -275,6 +275,11 @@ func TestInsertEventsBatch_OnConflictDoNothing(t *testing.T) {
 	if err := InsertEventsBatch(ctx, db, []model.Event{r1, r2}); err != nil {
 		t.Fatalf("InsertEventsBatch: %v", err)
 	}
+	r3 := r1
+	r3.Timestamp = r1.Timestamp.Add(time.Minute)
+	if err := InsertEventsBatch(ctx, db, []model.Event{r3}); err != nil {
+		t.Fatalf("InsertEventsBatch retry: %v", err)
+	}
 	var count int64
 	if err := db.WithContext(ctx).Model(&model.Event{}).Count(&count).Error; err != nil {
 		t.Fatalf("count: %v", err)
