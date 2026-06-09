@@ -88,20 +88,20 @@ See `.env.example` for a complete example.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `NSQ_MAX_IN_FLIGHT` | Max in-flight messages. | `200` |
+| `NSQ_MAX_IN_FLIGHT` | Max in-flight messages. | `2000` |
 | `NSQ_EVENT_CHANNEL` | Event consumer channel name. | `event-consumer` |
 | `NSQ_LOG_CHANNEL` | Log consumer channel name. | `log-consumer` |
-| `NSQ_EVENT_CONCURRENCY` | Event consumer concurrency. | `1` |
-| `NSQ_LOG_CONCURRENCY` | Log consumer concurrency. | `1` |
+| `NSQ_EVENT_CONCURRENCY` | Event consumer concurrency. | `50` |
+| `NSQ_LOG_CONCURRENCY` | Log consumer concurrency. | `200` |
 
 ### Batch Write Tuning
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DB_LOG_BATCH_SIZE` | Log batch write size. | `200` |
-| `DB_LOG_FLUSH_INTERVAL` | Log flush interval. | `50ms` |
+| `DB_LOG_BATCH_SIZE` | Log batch write size. | `500` |
+| `DB_LOG_FLUSH_INTERVAL` | Log flush interval. | `20ms` |
 | `DB_EVENT_BATCH_SIZE` | Event batch write size. | `200` |
-| `DB_EVENT_FLUSH_INTERVAL` | Event flush interval. | `50ms` |
+| `DB_EVENT_FLUSH_INTERVAL` | Event flush interval. | `20ms` |
 
 ### Data Cleanup
 
@@ -331,20 +331,20 @@ docker compose up --build
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `NSQ_MAX_IN_FLIGHT` | NSQ 最大并行处理消息数。 | `200` |
+| `NSQ_MAX_IN_FLIGHT` | NSQ 最大并行处理消息数。 | `2000` |
 | `NSQ_EVENT_CHANNEL` | 事件消费 channel 名称。 | `event-consumer` |
 | `NSQ_LOG_CHANNEL` | 日志消费 channel 名称。 | `log-consumer` |
-| `NSQ_EVENT_CONCURRENCY` | 事件消费并发数。 | `1` |
-| `NSQ_LOG_CONCURRENCY` | 日志消费并发数。 | `1` |
+| `NSQ_EVENT_CONCURRENCY` | 事件消费并发数。 | `50` |
+| `NSQ_LOG_CONCURRENCY` | 日志消费并发数。 | `200` |
 
 ### 批量写入调优
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `DB_LOG_BATCH_SIZE` | 日志批量写入大小。 | `200` |
-| `DB_LOG_FLUSH_INTERVAL` | 日志刷新间隔。 | `50ms` |
+| `DB_LOG_BATCH_SIZE` | 日志批量写入大小。 | `500` |
+| `DB_LOG_FLUSH_INTERVAL` | 日志刷新间隔。 | `20ms` |
 | `DB_EVENT_BATCH_SIZE` | 事件批量写入大小。 | `200` |
-| `DB_EVENT_FLUSH_INTERVAL` | 事件刷新间隔。 | `50ms` |
+| `DB_EVENT_FLUSH_INTERVAL` | 事件刷新间隔。 | `20ms` |
 
 ### 数据清理
 
