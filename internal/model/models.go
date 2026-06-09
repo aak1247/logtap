@@ -101,6 +101,39 @@ type TrackEventDaily struct {
 
 func (TrackEventDaily) TableName() string { return "track_event_daily" }
 
+// UserFirstSeen stores the earliest known activity timestamp per project user.
+// It accelerates user-growth analytics without repeatedly scanning raw logs.
+type UserFirstSeen struct {
+	ProjectID  int       `gorm:"not null;uniqueIndex:idx_user_first_seen_key,priority:1;index:idx_user_first_seen_project_ts,priority:1;column:project_id"`
+	DistinctID string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_user_first_seen_key,priority:2;column:distinct_id"`
+	FirstSeen  time.Time `gorm:"not null;index:idx_user_first_seen_project_ts,priority:2;column:first_seen"`
+	UpdatedAt  time.Time `gorm:"not null;autoUpdateTime;column:updated_at"`
+}
+
+func (UserFirstSeen) TableName() string { return "user_first_seen" }
+
+// ProjectCounter stores exact all-time counters for cheap total metrics.
+type ProjectCounter struct {
+	ProjectID int       `gorm:"not null;uniqueIndex:idx_project_counters_key,priority:1;column:project_id"`
+	Metric    string    `gorm:"type:varchar(64);not null;uniqueIndex:idx_project_counters_key,priority:2;column:metric"`
+	Value     int64     `gorm:"not null;default:0;column:value"`
+	UpdatedAt time.Time `gorm:"not null;autoUpdateTime;column:updated_at"`
+}
+
+func (ProjectCounter) TableName() string { return "project_counters" }
+
+// LogDailyStat stores exact day-level counters for log/event overview metrics.
+type LogDailyStat struct {
+	ProjectID int       `gorm:"not null;uniqueIndex:idx_log_daily_stats_key,priority:1;index:idx_log_daily_stats_project_day,priority:1;column:project_id"`
+	Day       string    `gorm:"type:varchar(10);not null;uniqueIndex:idx_log_daily_stats_key,priority:2;index:idx_log_daily_stats_project_day,priority:2;column:day"`
+	Kind      string    `gorm:"type:varchar(20);not null;uniqueIndex:idx_log_daily_stats_key,priority:3;column:kind"`
+	Level     string    `gorm:"type:varchar(20);not null;uniqueIndex:idx_log_daily_stats_key,priority:4;column:level"`
+	Count     int64     `gorm:"not null;default:0;column:count"`
+	UpdatedAt time.Time `gorm:"not null;autoUpdateTime;column:updated_at"`
+}
+
+func (LogDailyStat) TableName() string { return "log_daily_stats" }
+
 type CleanupPolicy struct {
 	ProjectID                int        `gorm:"primaryKey;column:project_id" json:"project_id"`
 	Enabled                  bool       `gorm:"not null;default:false;column:enabled" json:"enabled"`

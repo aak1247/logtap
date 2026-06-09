@@ -14,9 +14,9 @@ import (
 	"github.com/aak1247/logtap/internal/obs"
 	"github.com/aak1247/logtap/internal/openapi"
 	"github.com/aak1247/logtap/internal/query"
+	"github.com/aak1247/logtap/internal/queue"
 	"github.com/aak1247/logtap/internal/search"
 	searchpostgres "github.com/aak1247/logtap/internal/search/adapters/postgres"
-	"github.com/aak1247/logtap/internal/queue"
 	"github.com/gin-gonic/gin"
 	swgui "github.com/swaggest/swgui/v3"
 	"gorm.io/gorm"
@@ -190,8 +190,8 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 				monitors.POST("/:monitorId/test", query.TestMonitorHandler(db, detectorService))
 			}
 		}
-		queryAPI.GET("/metrics/today", query.MetricsTodayHandler(recorder))
-		queryAPI.GET("/metrics/total", query.MetricsTotalHandler(recorder))
+		queryAPI.GET("/metrics/today", query.MetricsTodayHandler(recorder, db))
+		queryAPI.GET("/metrics/total", query.MetricsTotalHandler(recorder, db))
 		queryAPI.GET("/analytics/active", query.ActiveSeriesHandler(recorder))
 		queryAPI.GET("/analytics/dist", query.DistributionHandler(recorder))
 		queryAPI.GET("/analytics/retention", query.RetentionHandler(recorder))

@@ -25,8 +25,17 @@ func SearchHandler(engine *SearchEngine) gin.HandlerFunc {
 		}
 
 		q := c.Query("q")
-		start, _ := parseTimeQS(c.Query("start"))
-		end, _ := parseTimeQS(c.Query("end"))
+		start, okStart := parseTimeQS(c.Query("start"))
+		end, okEnd := parseTimeQS(c.Query("end"))
+		if !okEnd {
+			end = time.Now().UTC()
+		}
+		if !okStart {
+			start = end.AddDate(0, 0, -29)
+		}
+		if end.Before(start) {
+			start, end = end, start
+		}
 		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 		pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "50"))
 

@@ -33,6 +33,9 @@ func AutoMigrate(ctx context.Context, db *gorm.DB, opts Options) error {
 		&model.Log{},
 		&model.TrackEvent{},
 		&model.TrackEventDaily{},
+		&model.UserFirstSeen{},
+		&model.ProjectCounter{},
+		&model.LogDailyStat{},
 		&model.CleanupPolicy{},
 		&model.EventDefinition{},
 		&model.PropertyDefinition{},
@@ -75,6 +78,13 @@ func AutoMigrate(ctx context.Context, db *gorm.DB, opts Options) error {
 	}
 
 	if err := gdb.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_project_keys_project_name ON project_keys (project_id, name)`).Error; err != nil {
+		return err
+	}
+
+	if err := backfillUserFirstSeenIfEmpty(gdb); err != nil {
+		return err
+	}
+	if err := backfillMetricsRollupsIfEmpty(gdb); err != nil {
 		return err
 	}
 
@@ -253,4 +263,130 @@ func uniqueIndexMatches(db *gorm.DB, table string, index string, columns []strin
 		return false, err
 	}
 	return got == strings.Join(columns, ","), nil
+}
+
+func backfillUserFirstSeenIfEmpty(db *gorm.DB) error {
+	if db == nil {
+		return gorm.ErrInvalidDB
+	}
+	if !db.Migrator().HasTable("user_first_seen") {
+		return nil
+	}
+
+	var existing int
+	if err := db.Raw("SELECT 1 FROM user_first_seen LIMIT 1").Scan(&existing).Error; err != nil {
+		return fmt.Errorf("check user_first_seen: %w", err)
+	}
+	if existing == 1 {
+		return nil
+	}
+
+	parts := []string{}
+	if db.Migrator().HasTable("logs") {
+		parts = append(parts, "SELECT project_id, distinct_id, timestamp FROM logs WHERE distinct_id IS NOT NULL AND distinct_id <> ''")
+	}
+	if db.Migrator().HasTable("track_events") {
+		parts = append(parts, "SELECT project_id, distinct_id, timestamp FROM track_events WHERE distinct_id IS NOT NULL AND distinct_id <> ''")
+	}
+	if db.Migrator().HasTable("events") {
+		parts = append(parts, "SELECT project_id, distinct_id, timestamp FROM events WHERE distinct_id IS NOT NULL AND distinct_id <> ''")
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+
+	sql := `
+		INSERT INTO user_first_seen (project_id, distinct_id, first_seen, updated_at)
+		SELECT project_id, distinct_id, MIN(timestamp), NOW()
+		FROM (` + strings.Join(parts, " UNION ALL ") + `) src
+		GROUP BY project_id, distinct_id
+		ON CONFLICT (project_id, distinct_id) DO UPDATE
+		SET first_seen = LEAST(user_first_seen.first_seen, EXCLUDED.first_seen),
+		    updated_at = NOW()
+	`
+	if err := db.Exec(sql).Error; err != nil {
+		return fmt.Errorf("backfill user_first_seen: %w", err)
+	}
+	return nil
+}
+
+func backfillMetricsRollupsIfEmpty(db *gorm.DB) error {
+	if db == nil {
+		return gorm.ErrInvalidDB
+	}
+	if !strings.EqualFold(db.Dialector.Name(), "postgres") {
+		return nil
+	}
+	if !db.Migrator().HasTable("project_counters") || !db.Migrator().HasTable("log_daily_stats") {
+		return nil
+	}
+
+	var existing int
+	if err := db.Raw("SELECT 1 FROM project_counters LIMIT 1").Scan(&existing).Error; err != nil {
+		return fmt.Errorf("check project_counters: %w", err)
+	}
+	if existing == 1 {
+		return nil
+	}
+
+	if db.Migrator().HasTable("logs") {
+		if err := db.Exec(`
+			INSERT INTO project_counters (project_id, metric, value, updated_at)
+			SELECT project_id, 'logs_total', COUNT(*), NOW()
+			FROM logs
+			GROUP BY project_id
+			ON CONFLICT (project_id, metric) DO UPDATE
+			SET value = EXCLUDED.value,
+			    updated_at = NOW()
+		`).Error; err != nil {
+			return fmt.Errorf("backfill log counters: %w", err)
+		}
+		if err := db.Exec(`
+			INSERT INTO log_daily_stats (project_id, day, kind, level, count, updated_at)
+			SELECT project_id,
+			       to_char((timestamp AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS day,
+			       'log' AS kind,
+			       COALESCE(NULLIF(lower(trim(level)), ''), 'unknown') AS level,
+			       COUNT(*) AS count,
+			       NOW()
+			FROM logs
+			GROUP BY project_id, day, level
+			ON CONFLICT (project_id, day, kind, level) DO UPDATE
+			SET count = EXCLUDED.count,
+			    updated_at = NOW()
+		`).Error; err != nil {
+			return fmt.Errorf("backfill log daily stats: %w", err)
+		}
+	}
+
+	if db.Migrator().HasTable("track_events") {
+		if err := db.Exec(`
+			INSERT INTO project_counters (project_id, metric, value, updated_at)
+			SELECT project_id, 'events_total', COUNT(*), NOW()
+			FROM track_events
+			GROUP BY project_id
+			ON CONFLICT (project_id, metric) DO UPDATE
+			SET value = EXCLUDED.value,
+			    updated_at = NOW()
+		`).Error; err != nil {
+			return fmt.Errorf("backfill event counters: %w", err)
+		}
+		if err := db.Exec(`
+			INSERT INTO log_daily_stats (project_id, day, kind, level, count, updated_at)
+			SELECT project_id,
+			       to_char((timestamp AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS day,
+			       'event' AS kind,
+			       'event' AS level,
+			       COUNT(*) AS count,
+			       NOW()
+			FROM track_events
+			GROUP BY project_id, day
+			ON CONFLICT (project_id, day, kind, level) DO UPDATE
+			SET count = EXCLUDED.count,
+			    updated_at = NOW()
+		`).Error; err != nil {
+			return fmt.Errorf("backfill event daily stats: %w", err)
+		}
+	}
+	return nil
 }

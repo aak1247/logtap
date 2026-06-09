@@ -7,12 +7,14 @@ import (
 
 	"github.com/aak1247/logtap/internal/metrics"
 	"github.com/aak1247/logtap/internal/project"
+	"github.com/aak1247/logtap/internal/store"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-func MetricsTodayHandler(recorder *metrics.RedisRecorder) gin.HandlerFunc {
+func MetricsTodayHandler(recorder *metrics.RedisRecorder, db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if recorder == nil {
+		if recorder == nil && db == nil {
 			respondErr(c, http.StatusNotImplemented, "metrics not configured")
 			return
 		}
@@ -25,7 +27,8 @@ func MetricsTodayHandler(recorder *metrics.RedisRecorder) gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		defer cancel()
 
-		logs, events, errorsCount, users, ok, err := recorder.Today(ctx, projectID, time.Now().UTC())
+		now := time.Now().UTC()
+		logs, events, errorsCount, users, ok, err := metricsToday(ctx, recorder, db, projectID, now)
 		if err != nil {
 			respondErr(c, http.StatusServiceUnavailable, err.Error())
 			return
@@ -36,7 +39,7 @@ func MetricsTodayHandler(recorder *metrics.RedisRecorder) gin.HandlerFunc {
 		}
 		respondOK(c, gin.H{
 			"project_id": projectID,
-			"date":       time.Now().UTC().Format("2006-01-02"),
+			"date":       now.Format("2006-01-02"),
 			"logs":       logs,
 			"events":     events,
 			"errors":     errorsCount,
@@ -45,9 +48,9 @@ func MetricsTodayHandler(recorder *metrics.RedisRecorder) gin.HandlerFunc {
 	}
 }
 
-func MetricsTotalHandler(recorder *metrics.RedisRecorder) gin.HandlerFunc {
+func MetricsTotalHandler(recorder *metrics.RedisRecorder, db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if recorder == nil {
+		if recorder == nil && db == nil {
 			respondErr(c, http.StatusNotImplemented, "metrics not configured")
 			return
 		}
@@ -60,7 +63,7 @@ func MetricsTotalHandler(recorder *metrics.RedisRecorder) gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 		defer cancel()
 
-		logs, events, users, ok, err := recorder.Total(ctx, projectID)
+		logs, events, users, ok, err := metricsTotal(ctx, recorder, db, projectID)
 		if err != nil {
 			respondErr(c, http.StatusServiceUnavailable, err.Error())
 			return
@@ -76,4 +79,38 @@ func MetricsTotalHandler(recorder *metrics.RedisRecorder) gin.HandlerFunc {
 			"users":      users,
 		})
 	}
+}
+
+func metricsToday(ctx context.Context, recorder *metrics.RedisRecorder, db *gorm.DB, projectID int, now time.Time) (logs int64, events int64, errorsCount int64, users int64, ok bool, err error) {
+	if recorder != nil {
+		logs, events, errorsCount, users, ok, err = recorder.Today(ctx, projectID, now)
+		if err != nil || ok {
+			return logs, events, errorsCount, users, ok, err
+		}
+	}
+	if db == nil {
+		return 0, 0, 0, 0, false, nil
+	}
+	row, ok, err := store.GetDBMetricsToday(ctx, db, projectID, now)
+	if err != nil || !ok {
+		return 0, 0, 0, 0, ok, err
+	}
+	return row.Logs, row.Events, row.Errors, row.Users, true, nil
+}
+
+func metricsTotal(ctx context.Context, recorder *metrics.RedisRecorder, db *gorm.DB, projectID int) (logs int64, events int64, users int64, ok bool, err error) {
+	if recorder != nil {
+		logs, events, users, ok, err = recorder.Total(ctx, projectID)
+		if err != nil || ok {
+			return logs, events, users, ok, err
+		}
+	}
+	if db == nil {
+		return 0, 0, 0, false, nil
+	}
+	row, ok, err := store.GetDBMetricsTotal(ctx, db, projectID)
+	if err != nil || !ok {
+		return 0, 0, 0, ok, err
+	}
+	return row.Logs, row.Events, row.Users, true, nil
 }

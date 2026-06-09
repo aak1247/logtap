@@ -703,6 +703,35 @@ func userGrowthFromDB(ctx context.Context, db *gorm.DB, projectID int, start, en
 		start, end = end, start
 	}
 
+	if db.Migrator().HasTable("user_first_seen") {
+		return userGrowthFromFirstSeen(ctx, db, projectID, start, end)
+	}
+	return userGrowthFromRawEvents(ctx, db, projectID, start, end)
+}
+
+func userGrowthFromFirstSeen(ctx context.Context, db *gorm.DB, projectID int, start, end time.Time) ([]UserGrowthPoint, int64, error) {
+	seriesSQL := "SELECT DATE(first_seen) AS day, COUNT(*) AS new_users" +
+		" FROM user_first_seen" +
+		" WHERE project_id = ? AND first_seen >= ? AND first_seen <= ?" +
+		" GROUP BY DATE(first_seen)" +
+		" ORDER BY DATE(first_seen)"
+
+	var rows []userGrowthRow
+	if err := db.WithContext(ctx).Raw(seriesSQL, projectID, start, end).Scan(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var totalUsers int64
+	if err := db.WithContext(ctx).Table("user_first_seen").
+		Where("project_id = ?", projectID).
+		Count(&totalUsers).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return userGrowthPoints(rows), totalUsers, nil
+}
+
+func userGrowthFromRawEvents(ctx context.Context, db *gorm.DB, projectID int, start, end time.Time) ([]UserGrowthPoint, int64, error) {
 	hasLogs := db.Migrator().HasTable("logs")
 	hasTrackEvents := db.Migrator().HasTable("track_events")
 	if !hasLogs && !hasTrackEvents {
@@ -731,8 +760,6 @@ func userGrowthFromDB(ctx context.Context, db *gorm.DB, projectID int, start, en
 	b.WriteString(")")
 
 	baseSQL := b.String()
-
-	// Per-day new users within [start, end].
 	seriesSQL := baseSQL + " SELECT DATE(first_ts) AS day, COUNT(*) AS new_users" +
 		" FROM first_seen" +
 		" WHERE first_ts >= ? AND first_ts <= ?" +
@@ -745,13 +772,16 @@ func userGrowthFromDB(ctx context.Context, db *gorm.DB, projectID int, start, en
 		return nil, 0, err
 	}
 
-	// Total users across all time.
 	totalSQL := baseSQL + " SELECT COUNT(*) AS total_users FROM first_seen"
 	var totalUsers int64
 	if err := db.WithContext(ctx).Raw(totalSQL, args...).Scan(&totalUsers).Error; err != nil {
 		return nil, 0, err
 	}
 
+	return userGrowthPoints(rows), totalUsers, nil
+}
+
+func userGrowthPoints(rows []userGrowthRow) []UserGrowthPoint {
 	points := make([]UserGrowthPoint, 0, len(rows))
 	for _, r := range rows {
 		if strings.TrimSpace(r.Day) == "" {
@@ -759,6 +789,5 @@ func userGrowthFromDB(ctx context.Context, db *gorm.DB, projectID int, start, en
 		}
 		points = append(points, UserGrowthPoint{Day: r.Day, NewUsers: r.NewUsers})
 	}
-
-	return points, totalUsers, nil
+	return points
 }

@@ -40,6 +40,9 @@ func openTestDB(t *testing.T) *gorm.DB {
 		&model.Log{},
 		&model.TrackEvent{},
 		&model.TrackEventDaily{},
+		&model.UserFirstSeen{},
+		&model.ProjectCounter{},
+		&model.LogDailyStat{},
 	); err != nil {
 		t.Fatalf("AutoMigrate: %v", err)
 	}

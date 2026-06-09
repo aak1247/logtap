@@ -42,7 +42,7 @@ func openTopEventsHandlerTestDB(t testing.TB) *gorm.DB {
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 
-	if err := gdb.AutoMigrate(&model.Log{}, &model.TrackEvent{}, &model.TrackEventDaily{}); err != nil {
+	if err := gdb.AutoMigrate(&model.Log{}, &model.TrackEvent{}, &model.TrackEventDaily{}, &model.UserFirstSeen{}, &model.ProjectCounter{}, &model.LogDailyStat{}); err != nil {
 		t.Fatalf("AutoMigrate: %v", err)
 	}
 	return gdb

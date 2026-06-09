@@ -169,3 +169,84 @@ func TestInsertLogsAndTrackEventsBatch_IdempotentRollup(t *testing.T) {
 		t.Fatalf("expected rollup events=1, got %d", daily.Events)
 	}
 }
+
+func TestUserFirstSeenMaintainedFromLogsAndEvents(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	late := time.Date(2025, 4, 2, 12, 0, 0, 0, time.UTC)
+	early := time.Date(2025, 4, 1, 8, 0, 0, 0, time.UTC)
+	firstIngest := uuid.New()
+	secondIngest := uuid.New()
+	logs := []model.Log{
+		{ProjectID: 1, Timestamp: late, IngestID: &firstIngest, Level: "info", DistinctID: "u1", Message: "late"},
+		{ProjectID: 1, Timestamp: early, IngestID: &secondIngest, Level: "info", DistinctID: "u1", Message: "early"},
+	}
+	if err := InsertLogsBatch(ctx, db, logs); err != nil {
+		t.Fatalf("InsertLogsBatch: %v", err)
+	}
+
+	var got model.UserFirstSeen
+	if err := db.WithContext(ctx).Where("project_id = ? AND distinct_id = ?", 1, "u1").First(&got).Error; err != nil {
+		t.Fatalf("query first_seen: %v", err)
+	}
+	if !got.FirstSeen.Equal(early) {
+		t.Fatalf("expected first_seen=%v, got %v", early, got.FirstSeen)
+	}
+}
+
+func TestMetricsRollupMaintainedFromLogsAndTrackEvents(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2025, 5, 1, 12, 0, 0, 0, time.UTC)
+	logIngestID := uuid.New()
+	trackIngestID := uuid.New()
+
+	if err := InsertLogsBatch(ctx, db, []model.Log{{
+		ProjectID: 1,
+		Timestamp: now,
+		IngestID:  &logIngestID,
+		Level:     "error",
+		Message:   "boom",
+	}}); err != nil {
+		t.Fatalf("InsertLogsBatch: %v", err)
+	}
+	if err := InsertLogsBatch(ctx, db, []model.Log{{
+		ProjectID: 1,
+		Timestamp: now,
+		IngestID:  &logIngestID,
+		Level:     "error",
+		Message:   "boom retry",
+	}}); err != nil {
+		t.Fatalf("InsertLogsBatch retry: %v", err)
+	}
+	if err := InsertTrackEventsAndRollupBatch(ctx, db, []model.TrackEvent{{
+		ProjectID:  1,
+		Timestamp:  now,
+		IngestID:   &trackIngestID,
+		Name:       "signup",
+		DistinctID: "u1",
+	}}); err != nil {
+		t.Fatalf("InsertTrackEventsAndRollupBatch: %v", err)
+	}
+
+	today, ok, err := GetDBMetricsToday(ctx, db, 1, now)
+	if err != nil || !ok {
+		t.Fatalf("GetDBMetricsToday: %+v ok=%v err=%v", today, ok, err)
+	}
+	if today.Logs != 1 || today.Events != 1 || today.Errors != 1 {
+		t.Fatalf("unexpected today metrics: %+v", today)
+	}
+
+	total, ok, err := GetDBMetricsTotal(ctx, db, 1)
+	if err != nil || !ok {
+		t.Fatalf("GetDBMetricsTotal: %+v ok=%v err=%v", total, ok, err)
+	}
+	if total.Logs != 1 || total.Events != 1 || total.Users != 1 {
+		t.Fatalf("unexpected total metrics: %+v", total)
+	}
+}

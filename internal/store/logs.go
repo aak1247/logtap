@@ -25,6 +25,12 @@ func InsertLog(ctx context.Context, db *gorm.DB, projectID string, lp ingest.Cus
 	if err := db.WithContext(ctx).Create(&row).Error; err != nil {
 		return err
 	}
+	if err := UpsertUserFirstSeenFromLogs(ctx, db, []model.Log{row}); err != nil {
+		return err
+	}
+	if err := UpsertLogMetricsFromLogs(ctx, db, []model.Log{row}); err != nil {
+		return err
+	}
 
 	// Best-effort alert evaluation; must not break the ingest path.
 	evalCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)

@@ -205,7 +205,7 @@ func insertTrackEventsAndRollupPostgres(ctx context.Context, db *gorm.DB, rows [
 	if err != nil {
 		return err
 	}
-	// Insert track_events with idempotency, and roll up only the rows that were actually inserted.
+	// Insert track_events with idempotency, roll up only inserted rows, and maintain first-seen users.
 	// This keeps rollups exact under retries/concurrency (at-least-once delivery).
 	return db.WithContext(ctx).Exec(`
 		WITH input AS (
@@ -226,6 +226,17 @@ func insertTrackEventsAndRollupPostgres(ctx context.Context, db *gorm.DB, rows [
 			FROM input
 			ON CONFLICT (project_id, ingest_id, timestamp) DO NOTHING
 			RETURNING project_id, timestamp, name, distinct_id
+		),
+		user_seen AS (
+			INSERT INTO user_first_seen (project_id, distinct_id, first_seen, updated_at)
+			SELECT project_id, distinct_id, MIN(timestamp), NOW()
+			FROM ins
+			WHERE distinct_id IS NOT NULL AND distinct_id <> ''
+			GROUP BY project_id, distinct_id
+			ON CONFLICT (project_id, distinct_id) DO UPDATE
+			SET first_seen = LEAST(user_first_seen.first_seen, EXCLUDED.first_seen),
+			    updated_at = NOW()
+			RETURNING 1
 		),
 		agg AS (
 			SELECT
@@ -302,6 +313,12 @@ func insertTrackEventsAndRollupBestEffort(ctx context.Context, db *gorm.DB, rows
 			if err := UpsertTrackEventDailyBatch(ctx, db, daily); err != nil {
 				return err
 			}
+		}
+		if err := UpsertUserFirstSeenFromTrackEvents(ctx, db, newEvents); err != nil {
+			return err
+		}
+		if err := UpsertEventMetricsFromTrackEvents(ctx, db, newEvents); err != nil {
+			return err
 		}
 	}
 	return nil

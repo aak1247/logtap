@@ -15,10 +15,23 @@ func InsertLogsBatch(ctx context.Context, db *gorm.DB, rows []model.Log) error {
 	if db == nil || len(rows) == 0 {
 		return nil
 	}
+	newRows, err := filterExistingLogIngestIDs(ctx, db, rows)
+	if err != nil {
+		return err
+	}
+	if len(newRows) == 0 {
+		return nil
+	}
 	// Use a conservative batch size; caller can already be batching.
-	return db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Clauses(clause.OnConflict{DoNothing: true}).
-		CreateInBatches(&rows, 200).Error
+		CreateInBatches(&newRows, 200).Error; err != nil {
+		return err
+	}
+	if err := UpsertUserFirstSeenFromLogs(ctx, db, newRows); err != nil {
+		return err
+	}
+	return UpsertLogMetricsFromLogs(ctx, db, newRows)
 }
 
 func InsertEventsBatch(ctx context.Context, db *gorm.DB, rows []model.Event) error {
@@ -36,9 +49,15 @@ func InsertEventsBatch(ctx context.Context, db *gorm.DB, rows []model.Event) err
 		if len(newRows) == 0 {
 			return nil
 		}
-		return tx.WithContext(ctx).
+		if err := tx.WithContext(ctx).
 			Clauses(clause.OnConflict{DoNothing: true}).
-			CreateInBatches(&newRows, 200).Error
+			CreateInBatches(&newRows, 200).Error; err != nil {
+			return err
+		}
+		if err := UpsertUserFirstSeenFromEvents(ctx, tx, newRows); err != nil {
+			return err
+		}
+		return UpsertEventMetricsFromEvents(ctx, tx, newRows)
 	})
 }
 

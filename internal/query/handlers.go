@@ -122,8 +122,17 @@ func SearchLogsHandler(db *gorm.DB) gin.HandlerFunc {
 		mode := strings.ToLower(strings.TrimSpace(c.Query("mode")))
 		traceID := strings.TrimSpace(c.Query("trace_id"))
 		level := strings.TrimSpace(c.Query("level"))
-		start, _ := parseTime(c.Query("start"))
-		end, _ := parseTime(c.Query("end"))
+		start, okStart := parseTime(c.Query("start"))
+		end, okEnd := parseTime(c.Query("end"))
+		if !okEnd {
+			end = time.Now().UTC()
+		}
+		if !okStart {
+			start = end.AddDate(0, 0, -29)
+		}
+		if end.Before(start) {
+			start, end = end, start
+		}
 		limit := parseLimit(c.Query("limit"), 100, 500)
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
