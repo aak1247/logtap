@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
 
 type RedisRecorder struct {
@@ -259,6 +260,213 @@ func (r *RedisRecorder) ensureTotals(ctx context.Context, projectID int) error {
 	pipe.Set(ctx, readyKey, "1", 0)
 	_, err = pipe.Exec(ctx)
 	return err
+}
+
+type ActiveWarmupOptions struct {
+	Days      int
+	Months    int
+	BatchSize int
+	Now       time.Time
+}
+
+type activeWarmupRow struct {
+	ProjectID  int
+	Day        string
+	DistinctID string
+}
+
+func (r *RedisRecorder) WarmActiveUsersFromDB(ctx context.Context, db *gorm.DB, opts ActiveWarmupOptions) error {
+	if r == nil || r.rdb == nil || db == nil {
+		return nil
+	}
+	days := opts.Days
+	if days <= 0 {
+		days = 30
+	}
+	months := opts.Months
+	if months <= 0 {
+		months = 6
+	}
+	batchSize := opts.BatchSize
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+	now := opts.Now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	readyDayKey := activeWarmupDayReadyKey(now)
+	readyMonthKey := activeWarmupMonthReadyKey(now)
+	readyDays, _ := r.rdb.Get(ctx, readyDayKey).Int()
+	readyMonths, _ := r.rdb.Get(ctx, readyMonthKey).Int()
+	if readyDays >= days && readyMonths >= months {
+		return nil
+	}
+
+	sources := activeWarmupSources(db)
+	if len(sources) == 0 {
+		return nil
+	}
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -days+1)
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -months+1, 0)
+	start := dayStart
+	if monthStart.Before(start) {
+		start = monthStart
+	}
+	end := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
+	query, args := activeWarmupSQL(db, sources, start, end)
+
+	rows, err := db.WithContext(ctx).Raw(query, args...).Rows()
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	pipe := r.rdb.Pipeline()
+	expire := map[string]time.Duration{}
+	pending := 0
+	for rows.Next() {
+		var row activeWarmupRow
+		if err := rows.Scan(&row.ProjectID, &row.Day, &row.DistinctID); err != nil {
+			return err
+		}
+		day := normalizeActiveWarmupDay(row.Day)
+		distinctID := strings.TrimSpace(row.DistinctID)
+		if row.ProjectID <= 0 || day == "" || distinctID == "" {
+			continue
+		}
+		mauKey := fmt.Sprintf("active:mau:%d:%s", row.ProjectID, day[:len("2006-01")])
+		pipe.PFAdd(ctx, mauKey, distinctID)
+		expire[mauKey] = r.monthTTL
+		pending++
+		if activeWarmupDayInRange(day, dayStart, end) {
+			dauKey := fmt.Sprintf("active:dau:%d:%s", row.ProjectID, day)
+			usersDayKey := fmt.Sprintf("metrics:users:%d:%s", row.ProjectID, day)
+			pipe.PFAdd(ctx, dauKey, distinctID)
+			pipe.PFAdd(ctx, usersDayKey, distinctID)
+			expire[dauKey] = r.dayTTL
+			expire[usersDayKey] = r.dayTTL
+			pending += 2
+		}
+		if pending >= batchSize {
+			if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+				return err
+			}
+			pipe = r.rdb.Pipeline()
+			pending = 0
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if pending > 0 {
+		if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+			return err
+		}
+	}
+	r.expireKeys(ctx, expire)
+	pipe = r.rdb.Pipeline()
+	pipe.Set(ctx, readyDayKey, days, 25*time.Hour)
+	pipe.Set(ctx, readyMonthKey, months, 25*time.Hour)
+	_, err = pipe.Exec(ctx)
+	return err
+}
+
+func (r *RedisRecorder) ActiveWarmupCovers(ctx context.Context, start, end time.Time, bucket string) bool {
+	if r == nil || r.rdb == nil {
+		return false
+	}
+	start = start.UTC()
+	end = end.UTC()
+	if end.Before(start) {
+		start, end = end, start
+	}
+	today := time.Now().UTC()
+	todayDay := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
+	if bucket == "month" {
+		startMonth := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, time.UTC)
+		endMonth := time.Date(end.Year(), end.Month(), 1, 0, 0, 0, 0, time.UTC)
+		todayMonth := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+		if endMonth.After(todayMonth) {
+			return false
+		}
+		needed := (todayMonth.Year()-startMonth.Year())*12 + int(todayMonth.Month()-startMonth.Month()) + 1
+		if needed <= 0 {
+			return false
+		}
+		readyMonths, err := r.rdb.Get(ctx, activeWarmupMonthReadyKey(todayDay)).Int()
+		return err == nil && readyMonths >= needed
+	}
+
+	startDay := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	endDay := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+	if endDay.After(todayDay) {
+		return false
+	}
+	needed := int(todayDay.Sub(startDay).Hours()/24) + 1
+	if needed <= 0 {
+		return false
+	}
+	readyDays, err := r.rdb.Get(ctx, activeWarmupDayReadyKey(todayDay)).Int()
+	return err == nil && readyDays >= needed
+}
+
+func activeWarmupSources(db *gorm.DB) []string {
+	if db == nil {
+		return nil
+	}
+	var sources []string
+	for _, table := range []string{"logs", "events", "track_events"} {
+		if db.Migrator().HasTable(table) {
+			sources = append(sources, table)
+		}
+	}
+	return sources
+}
+
+func activeWarmupSQL(db *gorm.DB, sources []string, start, end time.Time) (string, []any) {
+	dayExpr := "DATE(timestamp)"
+	if db != nil && strings.EqualFold(db.Dialector.Name(), "postgres") {
+		dayExpr = "TO_CHAR(timestamp AT TIME ZONE 'UTC', 'YYYY-MM-DD')"
+	}
+
+	var b strings.Builder
+	args := make([]any, 0, len(sources)*2)
+	b.WriteString("WITH active_events AS (")
+	for i, source := range sources {
+		if i > 0 {
+			b.WriteString(" UNION ALL ")
+		}
+		b.WriteString("SELECT project_id, timestamp, distinct_id FROM ")
+		b.WriteString(source)
+		b.WriteString(" WHERE distinct_id IS NOT NULL AND distinct_id <> '' AND timestamp >= ? AND timestamp < ?")
+		args = append(args, start, end)
+	}
+	b.WriteString(") SELECT DISTINCT project_id, ")
+	b.WriteString(dayExpr)
+	b.WriteString(" AS day, distinct_id FROM active_events ORDER BY project_id, day")
+	return b.String(), args
+}
+
+func normalizeActiveWarmupDay(day string) string {
+	day = strings.TrimSpace(day)
+	if len(day) < len("2006-01-02") {
+		return ""
+	}
+	return day[:len("2006-01-02")]
+}
+
+func activeWarmupDayInRange(day string, start, end time.Time) bool {
+	t, err := time.ParseInLocation("2006-01-02", day, time.UTC)
+	return err == nil && !t.Before(start) && t.Before(end)
+}
+
+func activeWarmupDayReadyKey(t time.Time) string {
+	return fmt.Sprintf("active:warmup:ready:day:%s", t.UTC().Format("2006-01-02"))
+}
+
+func activeWarmupMonthReadyKey(t time.Time) string {
+	return fmt.Sprintf("active:warmup:ready:month:%s", t.UTC().Format("2006-01-02"))
 }
 
 func (r *RedisRecorder) sumByKeyPattern(

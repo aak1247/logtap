@@ -77,7 +77,15 @@ func InsertLogsAndTrackEventsBatch(ctx context.Context, db *gorm.DB, logs []mode
 			return nil
 		}
 		events := TrackEventRowsFromLogs(newLogs)
-		if err := InsertLogsBatch(ctx, tx, newLogs); err != nil {
+		if err := tx.WithContext(ctx).
+			Clauses(clause.OnConflict{DoNothing: true}).
+			CreateInBatches(&newLogs, 200).Error; err != nil {
+			return err
+		}
+		if err := UpsertUserFirstSeenFromLogs(ctx, tx, newLogs); err != nil {
+			return err
+		}
+		if err := UpsertLogMetricsFromLogs(ctx, tx, newLogs); err != nil {
 			return err
 		}
 		if len(events) > 0 {

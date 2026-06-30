@@ -14,49 +14,52 @@ import (
 )
 
 type Config struct {
-	HTTPAddr               string
-	NSQDAddress            string
-	NSQDHTTPAddress        string
-	PostgresURL            string
-	RunConsumers           bool
-	RunAlertWorker         bool
-	NSQEventChannel        string
-	NSQLogChannel          string
-	NSQMaxInFlight         int
-	NSQEventConcurrency    int
-	NSQLogConcurrency      int
-	DBMaxOpenConns         int
-	DBMaxIdleConns         int
-	DBLogBatchSize         int
-	DBLogFlushInterval     time.Duration
-	DBEventBatchSize       int
-	DBEventFlushInterval   time.Duration
-	CleanupInterval        time.Duration
-	CleanupPolicyLimit     int
-	CleanupDeleteBatchSize int
-	CleanupMaxBatches      int
-	CleanupBatchSleep      time.Duration
-	RedisAddr              string
-	RedisPassword          string
-	RedisDB                int
-	EnableMetrics          bool
-	MetricsDayTTL          time.Duration
-	MetricsDistTTL         time.Duration
-	MetricsMonthTTL        time.Duration
-	GeoIPCityMMDB          string
-	GeoIPASNMMDB           string
-	AuthSecret             []byte
-	AuthTokenTTL           time.Duration
-	MaintenanceMode        bool
-	LogtapProxySecret      string
-	EnableDebugEndpoints   bool
-	DBRequireTimescale     bool
-	DBMigrationTimeout     time.Duration
-	DetectorPluginDirs     []string
-	RunMonitorWorker       bool
-	MonitorTickInterval    time.Duration
-	MonitorBatchSize       int
-	MonitorLeaseDuration   time.Duration
+	HTTPAddr                     string
+	NSQDAddress                  string
+	NSQDHTTPAddress              string
+	PostgresURL                  string
+	RunConsumers                 bool
+	RunAlertWorker               bool
+	NSQEventChannel              string
+	NSQLogChannel                string
+	NSQMaxInFlight               int
+	NSQEventConcurrency          int
+	NSQLogConcurrency            int
+	DBMaxOpenConns               int
+	DBMaxIdleConns               int
+	DBLogBatchSize               int
+	DBLogFlushInterval           time.Duration
+	DBEventBatchSize             int
+	DBEventFlushInterval         time.Duration
+	CleanupInterval              time.Duration
+	CleanupPolicyLimit           int
+	CleanupDeleteBatchSize       int
+	CleanupMaxBatches            int
+	CleanupBatchSleep            time.Duration
+	RedisAddr                    string
+	RedisPassword                string
+	RedisDB                      int
+	EnableMetrics                bool
+	MetricsDayTTL                time.Duration
+	MetricsDistTTL               time.Duration
+	MetricsMonthTTL              time.Duration
+	MetricsActiveWarmupDays      int
+	MetricsActiveWarmupMonths    int
+	MetricsActiveWarmupBatchSize int
+	GeoIPCityMMDB                string
+	GeoIPASNMMDB                 string
+	AuthSecret                   []byte
+	AuthTokenTTL                 time.Duration
+	MaintenanceMode              bool
+	LogtapProxySecret            string
+	EnableDebugEndpoints         bool
+	DBRequireTimescale           bool
+	DBMigrationTimeout           time.Duration
+	DetectorPluginDirs           []string
+	RunMonitorWorker             bool
+	MonitorTickInterval          time.Duration
+	MonitorBatchSize             int
+	MonitorLeaseDuration         time.Duration
 
 	// Webhook security (optional). Defaults to denying loopback/private IPs.
 	WebhookAllowLoopback   bool
@@ -151,6 +154,9 @@ Optional: set AUTH_SECRET_FILE=/path/to/secret (file contains the base64 secret)
 		MetricsDayTTL:                parseDurationDefault(getenvDefault("METRICS_DAY_TTL", "4320h"), 180*24*time.Hour),
 		MetricsDistTTL:               parseDurationDefault(getenvDefault("METRICS_DIST_TTL", "2160h"), 90*24*time.Hour),
 		MetricsMonthTTL:              parseDurationDefault(getenvDefault("METRICS_MONTH_TTL", "13392h"), 18*31*24*time.Hour),
+		MetricsActiveWarmupDays:      parseIntDefault(getenvDefault("METRICS_ACTIVE_WARMUP_DAYS", "30"), 30),
+		MetricsActiveWarmupMonths:    parseIntDefault(getenvDefault("METRICS_ACTIVE_WARMUP_MONTHS", "6"), 6),
+		MetricsActiveWarmupBatchSize: parseIntDefault(getenvDefault("METRICS_ACTIVE_WARMUP_BATCH_SIZE", "1000"), 1000),
 		GeoIPCityMMDB:                strings.TrimSpace(os.Getenv("GEOIP_CITY_MMDB")),
 		GeoIPASNMMDB:                 strings.TrimSpace(os.Getenv("GEOIP_ASN_MMDB")),
 		AuthSecret:                   authSecret,

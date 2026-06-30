@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -63,67 +64,141 @@ func UpsertEventMetricsFromTrackEvents(ctx context.Context, db *gorm.DB, rows []
 
 func GetDBMetricsToday(ctx context.Context, db *gorm.DB, projectID int, now time.Time) (MetricsToday, bool, error) {
 	var out MetricsToday
-	if db == nil || projectID <= 0 || !db.Migrator().HasTable(model.LogDailyStat{}.TableName()) {
+	if db == nil || projectID <= 0 {
 		return out, false, nil
 	}
 	day := now.UTC().Format("2006-01-02")
-	type row struct {
-		Kind  string `gorm:"column:kind"`
-		Level string `gorm:"column:level"`
-		Count int64  `gorm:"column:count"`
-	}
-	var rows []row
-	if err := db.WithContext(ctx).Table(model.LogDailyStat{}.TableName()).
-		Select("kind, level, count").
-		Where("project_id = ? AND day = ?", projectID, day).
-		Scan(&rows).Error; err != nil {
-		return out, true, err
-	}
-	for _, row := range rows {
-		switch row.Kind {
-		case "log":
-			out.Logs += row.Count
-		case "event":
-			out.Events += row.Count
+	if db.Migrator().HasTable(model.LogDailyStat{}.TableName()) {
+		type row struct {
+			Kind  string `gorm:"column:kind"`
+			Level string `gorm:"column:level"`
+			Count int64  `gorm:"column:count"`
 		}
-		if row.Level == "error" || row.Level == "fatal" {
-			out.Errors += row.Count
-		}
-	}
-	if db.Migrator().HasTable(model.UserFirstSeen{}.TableName()) {
-		start := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
-		end := start.Add(24 * time.Hour)
-		if err := db.WithContext(ctx).Table(model.UserFirstSeen{}.TableName()).
-			Where("project_id = ? AND first_seen >= ? AND first_seen < ?", projectID, start, end).
-			Count(&out.Users).Error; err != nil {
+		var rows []row
+		if err := db.WithContext(ctx).Table(model.LogDailyStat{}.TableName()).
+			Select("kind, level, count").
+			Where("project_id = ? AND day = ?", projectID, day).
+			Scan(&rows).Error; err != nil {
 			return out, true, err
 		}
+		for _, row := range rows {
+			switch row.Kind {
+			case "log":
+				out.Logs += row.Count
+			case "event":
+				out.Events += row.Count
+			}
+			if row.Level == "error" || row.Level == "fatal" {
+				out.Errors += row.Count
+			}
+		}
 	}
+
+	raw, rawOK, err := GetDBMetricsTodayRaw(ctx, db, projectID, now)
+	if err != nil || !rawOK {
+		return out, rawOK || db.Migrator().HasTable(model.LogDailyStat{}.TableName()), err
+	}
+	if raw.Logs > out.Logs {
+		out.Logs = raw.Logs
+	}
+	if raw.Events > out.Events {
+		out.Events = raw.Events
+	}
+	if raw.Errors > out.Errors {
+		out.Errors = raw.Errors
+	}
+	out.Users = raw.Users
+	return out, true, nil
+}
+
+func GetDBMetricsTodayRaw(ctx context.Context, db *gorm.DB, projectID int, now time.Time) (MetricsToday, bool, error) {
+	var out MetricsToday
+	if db == nil || projectID <= 0 {
+		return out, false, nil
+	}
+	start := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	var activeSources []string
+	if db.Migrator().HasTable(model.Log{}.TableName()) {
+		if err := db.WithContext(ctx).Table(model.Log{}.TableName()).
+			Where("project_id = ? AND timestamp >= ? AND timestamp < ?", projectID, start, end).
+			Count(&out.Logs).Error; err != nil {
+			return out, true, err
+		}
+		var logEvents int64
+		if err := db.WithContext(ctx).Table(model.Log{}.TableName()).
+			Where("project_id = ? AND timestamp >= ? AND timestamp < ? AND level = ?", projectID, start, end, "event").
+			Count(&logEvents).Error; err != nil {
+			return out, true, err
+		}
+		out.Events = logEvents
+		if err := db.WithContext(ctx).Table(model.Log{}.TableName()).
+			Where("project_id = ? AND timestamp >= ? AND timestamp < ? AND level IN ?", projectID, start, end, []string{"error", "fatal"}).
+			Count(&out.Errors).Error; err != nil {
+			return out, true, err
+		}
+		activeSources = append(activeSources, model.Log{}.TableName())
+	}
+	if db.Migrator().HasTable(model.Event{}.TableName()) {
+		var events int64
+		if err := db.WithContext(ctx).Table(model.Event{}.TableName()).
+			Where("project_id = ? AND timestamp >= ? AND timestamp < ?", projectID, start, end).
+			Count(&events).Error; err != nil {
+			return out, true, err
+		}
+		out.Events += events
+		var errorsCount int64
+		if err := db.WithContext(ctx).Table(model.Event{}.TableName()).
+			Where("project_id = ? AND timestamp >= ? AND timestamp < ? AND level IN ?", projectID, start, end, []string{"error", "fatal"}).
+			Count(&errorsCount).Error; err != nil {
+			return out, true, err
+		}
+		out.Errors += errorsCount
+		activeSources = append(activeSources, model.Event{}.TableName())
+	}
+	if db.Migrator().HasTable(model.TrackEvent{}.TableName()) {
+		var events int64
+		if err := db.WithContext(ctx).Table(model.TrackEvent{}.TableName()).
+			Where("project_id = ? AND timestamp >= ? AND timestamp < ?", projectID, start, end).
+			Count(&events).Error; err != nil {
+			return out, true, err
+		}
+		if events > out.Events {
+			out.Events = events
+		}
+	}
+	users, err := countDistinctUsersAcrossSources(ctx, db, projectID, activeSources, start, end)
+	if err != nil {
+		return out, true, err
+	}
+	out.Users = users
 	return out, true, nil
 }
 
 func GetDBMetricsTotal(ctx context.Context, db *gorm.DB, projectID int) (MetricsTotal, bool, error) {
 	var out MetricsTotal
-	if db == nil || projectID <= 0 || !db.Migrator().HasTable(model.ProjectCounter{}.TableName()) {
+	if db == nil || projectID <= 0 {
 		return out, false, nil
 	}
-	type row struct {
-		Metric string `gorm:"column:metric"`
-		Value  int64  `gorm:"column:value"`
-	}
-	var rows []row
-	if err := db.WithContext(ctx).Table(model.ProjectCounter{}.TableName()).
-		Select("metric, value").
-		Where("project_id = ?", projectID).
-		Scan(&rows).Error; err != nil {
-		return out, true, err
-	}
-	for _, row := range rows {
-		switch row.Metric {
-		case CounterLogsTotal:
-			out.Logs = row.Value
-		case CounterEventsTotal:
-			out.Events = row.Value
+	if db.Migrator().HasTable(model.ProjectCounter{}.TableName()) {
+		type row struct {
+			Metric string `gorm:"column:metric"`
+			Value  int64  `gorm:"column:value"`
+		}
+		var rows []row
+		if err := db.WithContext(ctx).Table(model.ProjectCounter{}.TableName()).
+			Select("metric, value").
+			Where("project_id = ?", projectID).
+			Scan(&rows).Error; err != nil {
+			return out, true, err
+		}
+		for _, row := range rows {
+			switch row.Metric {
+			case CounterLogsTotal:
+				out.Logs = row.Value
+			case CounterEventsTotal:
+				out.Events = row.Value
+			}
 		}
 	}
 	if db.Migrator().HasTable(model.UserFirstSeen{}.TableName()) {
@@ -133,7 +208,94 @@ func GetDBMetricsTotal(ctx context.Context, db *gorm.DB, projectID int) (Metrics
 			return out, true, err
 		}
 	}
+	raw, rawOK, err := GetDBMetricsTotalRaw(ctx, db, projectID)
+	if err != nil || !rawOK {
+		return out, rawOK || db.Migrator().HasTable(model.ProjectCounter{}.TableName()), err
+	}
+	if raw.Logs > out.Logs {
+		out.Logs = raw.Logs
+	}
+	if raw.Events > out.Events {
+		out.Events = raw.Events
+	}
+	if raw.Users > out.Users {
+		out.Users = raw.Users
+	}
 	return out, true, nil
+}
+
+func GetDBMetricsTotalRaw(ctx context.Context, db *gorm.DB, projectID int) (MetricsTotal, bool, error) {
+	var out MetricsTotal
+	if db == nil || projectID <= 0 {
+		return out, false, nil
+	}
+	var activeSources []string
+	if db.Migrator().HasTable(model.Log{}.TableName()) {
+		if err := db.WithContext(ctx).Table(model.Log{}.TableName()).Where("project_id = ?", projectID).Count(&out.Logs).Error; err != nil {
+			return out, true, err
+		}
+		var logEvents int64
+		if err := db.WithContext(ctx).Table(model.Log{}.TableName()).Where("project_id = ? AND level = ?", projectID, "event").Count(&logEvents).Error; err != nil {
+			return out, true, err
+		}
+		out.Events = logEvents
+		activeSources = append(activeSources, model.Log{}.TableName())
+	}
+	if db.Migrator().HasTable(model.Event{}.TableName()) {
+		var events int64
+		if err := db.WithContext(ctx).Table(model.Event{}.TableName()).Where("project_id = ?", projectID).Count(&events).Error; err != nil {
+			return out, true, err
+		}
+		out.Events += events
+		activeSources = append(activeSources, model.Event{}.TableName())
+	}
+	if db.Migrator().HasTable(model.TrackEvent{}.TableName()) {
+		var events int64
+		if err := db.WithContext(ctx).Table(model.TrackEvent{}.TableName()).Where("project_id = ?", projectID).Count(&events).Error; err != nil {
+			return out, true, err
+		}
+		if events > out.Events {
+			out.Events = events
+		}
+	}
+	users, err := countDistinctUsersAcrossSources(ctx, db, projectID, activeSources, time.Time{}, time.Time{})
+	if err != nil {
+		return out, true, err
+	}
+	out.Users = users
+	return out, true, nil
+}
+
+func countDistinctUsersAcrossSources(ctx context.Context, db *gorm.DB, projectID int, sources []string, start, end time.Time) (int64, error) {
+	if db == nil || projectID <= 0 || len(sources) == 0 {
+		return 0, nil
+	}
+	var b strings.Builder
+	args := make([]any, 0, len(sources)*3)
+	b.WriteString("WITH active_users AS (")
+	for i, source := range sources {
+		if i > 0 {
+			b.WriteString(" UNION ")
+		}
+		b.WriteString("SELECT distinct_id FROM ")
+		b.WriteString(source)
+		b.WriteString(" WHERE project_id = ? AND distinct_id IS NOT NULL AND distinct_id <> ''")
+		args = append(args, projectID)
+		if !start.IsZero() {
+			b.WriteString(" AND timestamp >= ?")
+			args = append(args, start)
+		}
+		if !end.IsZero() {
+			b.WriteString(" AND timestamp < ?")
+			args = append(args, end)
+		}
+	}
+	b.WriteString(") SELECT COUNT(*) FROM active_users")
+	var users int64
+	if err := db.WithContext(ctx).Raw(b.String(), args...).Scan(&users).Error; err != nil {
+		return 0, fmt.Errorf("count distinct active users: %w", err)
+	}
+	return users, nil
 }
 
 func logMetricRows(rows []model.Log) (map[projectMetric]int64, []model.LogDailyStat) {

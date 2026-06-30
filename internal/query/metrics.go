@@ -82,35 +82,27 @@ func MetricsTotalHandler(recorder *metrics.RedisRecorder, db *gorm.DB) gin.Handl
 }
 
 func metricsToday(ctx context.Context, recorder *metrics.RedisRecorder, db *gorm.DB, projectID int, now time.Time) (logs int64, events int64, errorsCount int64, users int64, ok bool, err error) {
-	if recorder != nil {
-		logs, events, errorsCount, users, ok, err = recorder.Today(ctx, projectID, now)
+	if db != nil {
+		row, ok, err := store.GetDBMetricsToday(ctx, db, projectID, now)
 		if err != nil || ok {
-			return logs, events, errorsCount, users, ok, err
+			return row.Logs, row.Events, row.Errors, row.Users, ok, err
 		}
 	}
-	if db == nil {
+	if recorder == nil {
 		return 0, 0, 0, 0, false, nil
 	}
-	row, ok, err := store.GetDBMetricsToday(ctx, db, projectID, now)
-	if err != nil || !ok {
-		return 0, 0, 0, 0, ok, err
-	}
-	return row.Logs, row.Events, row.Errors, row.Users, true, nil
+	return recorder.Today(ctx, projectID, now)
 }
 
 func metricsTotal(ctx context.Context, recorder *metrics.RedisRecorder, db *gorm.DB, projectID int) (logs int64, events int64, users int64, ok bool, err error) {
-	if recorder != nil {
-		logs, events, users, ok, err = recorder.Total(ctx, projectID)
+	if db != nil {
+		row, ok, err := store.GetDBMetricsTotal(ctx, db, projectID)
 		if err != nil || ok {
-			return logs, events, users, ok, err
+			return row.Logs, row.Events, row.Users, ok, err
 		}
 	}
-	if db == nil {
+	if recorder == nil {
 		return 0, 0, 0, false, nil
 	}
-	row, ok, err := store.GetDBMetricsTotal(ctx, db, projectID)
-	if err != nil || !ok {
-		return 0, 0, 0, ok, err
-	}
-	return row.Logs, row.Events, row.Users, true, nil
+	return recorder.Total(ctx, projectID)
 }

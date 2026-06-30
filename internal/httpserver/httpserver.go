@@ -192,9 +192,9 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 		}
 		queryAPI.GET("/metrics/today", query.MetricsTodayHandler(recorder, db))
 		queryAPI.GET("/metrics/total", query.MetricsTotalHandler(recorder, db))
-		queryAPI.GET("/analytics/active", query.ActiveSeriesHandler(recorder))
+		queryAPI.GET("/analytics/active", query.ActiveSeriesHandler(recorder, db))
 		queryAPI.GET("/analytics/dist", query.DistributionHandler(recorder))
-		queryAPI.GET("/analytics/retention", query.RetentionHandler(recorder))
+		queryAPI.GET("/analytics/retention", query.RetentionHandler(recorder, db))
 		queryAPI.GET("/properties/schema", query.ListPropertyDefinitionsHandler(db))
 		queryAPI.POST("/properties/schema", query.CreatePropertyDefinitionHandler(db))
 		queryAPI.PUT("/properties/schema/:propertyKey", query.UpdatePropertyDefinitionHandler(db))

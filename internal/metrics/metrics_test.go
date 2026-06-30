@@ -5,8 +5,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aak1247/logtap/internal/model"
 	miniredis "github.com/alicebob/miniredis/v2"
+	"github.com/glebarez/sqlite"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/datatypes"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func TestNewRedisClient(t *testing.T) {
@@ -92,5 +97,59 @@ func TestRedisRecorder_Today_Active_Distribution_Retention(t *testing.T) {
 	}
 	if rows[0].Points[0].Active != 1 || rows[0].Points[0].Rate != 1.0 {
 		t.Fatalf("unexpected retention point: %+v", rows[0].Points[0])
+	}
+}
+
+func TestRedisRecorder_WarmActiveUsersFromDB(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("gorm.Open(sqlite): %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.Log{}, &model.Event{}, &model.TrackEvent{}); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+
+	now := time.Now().UTC()
+	day1 := now.AddDate(0, 0, -2)
+	day2 := now.AddDate(0, 0, -1)
+	if err := gdb.Create(&[]model.Log{
+		{ProjectID: 1, Timestamp: day1, DistinctID: "u1", Level: "info", Message: "a", Fields: datatypes.JSON([]byte("{}"))},
+		{ProjectID: 1, Timestamp: day1.Add(time.Hour), DistinctID: "u1", Level: "info", Message: "b", Fields: datatypes.JSON([]byte("{}"))},
+		{ProjectID: 1, Timestamp: day2, DistinctID: "u2", Level: "info", Message: "c", Fields: datatypes.JSON([]byte("{}"))},
+	}).Error; err != nil {
+		t.Fatalf("insert logs: %v", err)
+	}
+
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	rec := NewRedisRecorder(rdb)
+
+	if err := rec.WarmActiveUsersFromDB(ctx, gdb, ActiveWarmupOptions{Days: 3, Months: 2, BatchSize: 2, Now: now}); err != nil {
+		t.Fatalf("WarmActiveUsersFromDB: %v", err)
+	}
+
+	daySeries, err := rec.ActiveSeries(ctx, 1, day1, day2, "day")
+	if err != nil {
+		t.Fatalf("ActiveSeries: %v", err)
+	}
+	if len(daySeries) != 2 || daySeries[0].Active != 1 || daySeries[1].Active != 1 {
+		t.Fatalf("unexpected day series: %+v", daySeries)
+	}
+	monthSeries, err := rec.ActiveSeries(ctx, 1, day1, day2, "month")
+	if err != nil {
+		t.Fatalf("ActiveSeries(month): %v", err)
+	}
+	if len(monthSeries) != 1 || monthSeries[0].Active != 2 {
+		t.Fatalf("unexpected month series: %+v", monthSeries)
+	}
+	if !rec.ActiveWarmupCovers(ctx, day1, day2, "day") {
+		t.Fatalf("expected warmup to cover %s - %s", day1, day2)
+	}
+	if !rec.ActiveWarmupCovers(ctx, day1, day2, "month") {
+		t.Fatalf("expected warmup to cover month range %s - %s", day1, day2)
 	}
 }

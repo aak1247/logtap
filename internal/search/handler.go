@@ -58,8 +58,27 @@ func SearchHandler(engine *SearchEngine) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, result)
+		c.JSON(http.StatusOK, gin.H{
+			"code": 0,
+			"data": gin.H{
+				"total":  result.Total,
+				"items":  result.Hits,
+				"hits":   result.Hits,
+				"facets": flattenFacets(result.Facets),
+			},
+		})
 	}
+}
+
+func flattenFacets(facets map[string]Facet) map[string][]FacetBucket {
+	if len(facets) == 0 {
+		return nil
+	}
+	out := make(map[string][]FacetBucket, len(facets))
+	for field, facet := range facets {
+		out[field] = facet.Buckets
+	}
+	return out
 }
 
 func parseTimeQS(s string) (time.Time, bool) {

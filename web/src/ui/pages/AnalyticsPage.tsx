@@ -1,24 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-	getActiveSeries,
-	getCleanupPolicy,
-	getDistribution,
-	getFunnel,
-	getRetention,
-	getTopEvents,
-	getUserGrowth,
-	postCustomAnalytics,
-	type ActiveSeriesResponse,
-	type CleanupPolicy,
-	type DistributionResponse,
-	type FunnelResponse,
-	type RetentionResponse,
-	type TopEventsResponse,
-	type UserGrowthResponse,
-	type CustomAnalyticsResponse,
+  getActiveSeries,
+  getCleanupPolicy,
+  getDistribution,
+  getFunnel,
+  getRetention,
+  getTopEvents,
+  getUserGrowth,
+  postCustomAnalytics,
+  type ActiveSeriesResponse,
+  type CleanupPolicy,
+  type DistributionResponse,
+  type FunnelResponse,
+  type RetentionResponse,
+  type TopEventsResponse,
+  type UserGrowthResponse,
+  type CustomAnalyticsResponse,
 } from "../../lib/api";
 import { loadSettings } from "../../lib/storage";
-import { clampFunnelDays, loadFunnelDays, saveFunnelDays } from "../../lib/prefs";
+import {
+  clampFunnelDays,
+  loadFunnelDays,
+  saveFunnelDays,
+} from "../../lib/prefs";
 import { TimeRangePicker } from "../components/DateTimePicker";
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
@@ -41,15 +45,21 @@ export function AnalyticsPage() {
   );
   const [retention, setRetention] = useState<RetentionResponse | null>(null);
   const [topEvents, setTopEvents] = useState<TopEventsResponse | null>(null);
-  const [cleanupPolicy, setCleanupPolicy] = useState<CleanupPolicy | null>(null);
+  const [cleanupPolicy, setCleanupPolicy] = useState<CleanupPolicy | null>(
+    null,
+  );
   const [userGrowth, setUserGrowth] = useState<UserGrowthResponse | null>(null);
-  const [funnelStepsText, setFunnelStepsText] = useState("signup,checkout,paid");
+  const [funnelStepsText, setFunnelStepsText] = useState(
+    "signup,checkout,paid",
+  );
   const [funnelWithin, setFunnelWithin] = useState("24h");
   const [funnelDays, setFunnelDays] = useState(() => loadFunnelDays());
-  const [funnelStart, setFunnelStart] = useState(() =>
-    buildRangeFromDays(loadFunnelDays()).start,
+  const [funnelStart, setFunnelStart] = useState(
+    () => buildRangeFromDays(loadFunnelDays()).start,
   );
-  const [funnelEnd, setFunnelEnd] = useState(() => buildRangeFromDays(loadFunnelDays()).end);
+  const [funnelEnd, setFunnelEnd] = useState(
+    () => buildRangeFromDays(loadFunnelDays()).end,
+  );
   const [funnel, setFunnel] = useState<FunnelResponse | null>(null);
   const [funnelBusy, setFunnelBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -77,7 +87,7 @@ export function AnalyticsPage() {
           getRetention(settings),
           getTopEvents(settings, { limit: 20 }),
           getCleanupPolicy(settings).catch(() => null),
-          getUserGrowth(settings).catch(() => null),
+          getUserGrowth(settings, buildUserGrowthRange()).catch(() => null),
         ]);
         if (cancelled) return;
         setDau(d);
@@ -188,9 +198,7 @@ export function AnalyticsPage() {
           />
         ) : null}
 
-        {tab === "event" ? (
-          <EventAnalyticsPanel settings={settings} />
-        ) : null}
+        {tab === "event" ? <EventAnalyticsPanel settings={settings} /> : null}
 
         {tab === "property" ? (
           <PropertyAnalyticsPanel settings={settings} />
@@ -259,7 +267,7 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
 
   return (
     <>
-      <Panel title="用户增长（近 180 天，新用户 + 累计）">
+      <Panel title="累计用户（近 180 天）">
         {userGrowth ? (
           (() => {
             const series = userGrowth.series ?? [];
@@ -272,7 +280,10 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
               return cumulative;
             });
             const lastDay = series[series.length - 1]?.day;
-            const lastTotal = cumulativeValues[cumulativeValues.length - 1] ?? userGrowth.total_users ?? 0;
+            const lastTotal =
+              cumulativeValues[cumulativeValues.length - 1] ??
+              userGrowth.total_users ??
+              0;
             return (
               <div className="space-y-3">
                 <div className="flex items-end justify-between">
@@ -281,7 +292,8 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
                 </div>
                 <Sparkline values={cumulativeValues} />
                 <div className="text-xs text-zinc-500">
-                  时间范围：{userGrowth.start.slice(0, 10)} ~ {userGrowth.end.slice(0, 10)}
+                  时间范围：{userGrowth.start.slice(0, 10)} ~{" "}
+                  {userGrowth.end.slice(0, 10)}
                 </div>
               </div>
             );
@@ -292,6 +304,80 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
       </Panel>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Panel title="日新增用户（近 14 天）">
+          {userGrowth ? (
+            (() => {
+              const series = buildDailyNewUsers(userGrowth, 14);
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-end justify-between">
+                    <div className="text-2xl font-semibold">
+                      {series.at(-1)?.new_users ?? 0}
+                    </div>
+                    <div className="text-xs text-zinc-500">
+                      {series.at(-1)?.day}
+                    </div>
+                  </div>
+                  <Sparkline values={series.map((s) => s.new_users)} />
+                  <div className="grid grid-cols-2 gap-2 text-xs text-zinc-500 md:grid-cols-4">
+                    {series.slice(-4).map((s) => (
+                      <div
+                        key={s.day}
+                        className="rounded-lg border border-zinc-900 p-2"
+                      >
+                        <div>{s.day}</div>
+                        <div className="mt-1 text-sm text-zinc-200">
+                          {s.new_users}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()
+          ) : (
+            <div className="text-sm text-zinc-500">加载中...</div>
+          )}
+        </Panel>
+
+        <Panel title="月新增用户（近 6 个月）">
+          {userGrowth ? (
+            (() => {
+              const series = buildMonthlyNewUsers(userGrowth, 6);
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-end justify-between">
+                    <div className="text-2xl font-semibold">
+                      {series.at(-1)?.new_users ?? 0}
+                    </div>
+                    <div className="text-xs text-zinc-500">
+                      {series.at(-1)?.month}
+                    </div>
+                  </div>
+                  <Sparkline values={series.map((s) => s.new_users)} />
+                  <div className="grid grid-cols-2 gap-2 text-xs text-zinc-500 md:grid-cols-3">
+                    {series.slice(-3).map((s) => (
+                      <div
+                        key={s.month}
+                        className="rounded-lg border border-zinc-900 p-2"
+                      >
+                        <div>{s.month}</div>
+                        <div className="mt-1 text-sm text-zinc-200">
+                          {s.new_users}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()
+          ) : (
+            <div className="text-sm text-zinc-500">加载中...</div>
+          )}
+        </Panel>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Panel title="DAU（近 14 天）">
           {dau ? (
             <div className="space-y-3">
@@ -299,12 +385,17 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
                 <div className="text-2xl font-semibold">
                   {dau.series.at(-1)?.active ?? 0}
                 </div>
-                <div className="text-xs text-zinc-500">{dau.series.at(-1)?.bucket}</div>
+                <div className="text-xs text-zinc-500">
+                  {dau.series.at(-1)?.bucket}
+                </div>
               </div>
               <Sparkline values={dau.series.map((s) => s.active)} />
               <div className="grid grid-cols-2 gap-2 text-xs text-zinc-500 md:grid-cols-4">
                 {dau.series.slice(-4).map((s) => (
-                  <div key={s.bucket} className="rounded-lg border border-zinc-900 p-2">
+                  <div
+                    key={s.bucket}
+                    className="rounded-lg border border-zinc-900 p-2"
+                  >
                     <div>{s.bucket}</div>
                     <div className="mt-1 text-sm text-zinc-200">{s.active}</div>
                   </div>
@@ -323,12 +414,17 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
                 <div className="text-2xl font-semibold">
                   {mau.series.at(-1)?.active ?? 0}
                 </div>
-                <div className="text-xs text-zinc-500">{mau.series.at(-1)?.bucket}</div>
+                <div className="text-xs text-zinc-500">
+                  {mau.series.at(-1)?.bucket}
+                </div>
               </div>
               <Sparkline values={mau.series.map((s) => s.active)} />
               <div className="grid grid-cols-2 gap-2 text-xs text-zinc-500 md:grid-cols-3">
                 {mau.series.slice(-3).map((s) => (
-                  <div key={s.bucket} className="rounded-lg border border-zinc-900 p-2">
+                  <div
+                    key={s.bucket}
+                    className="rounded-lg border border-zinc-900 p-2"
+                  >
                     <div>{s.bucket}</div>
                     <div className="mt-1 text-sm text-zinc-200">{s.active}</div>
                   </div>
@@ -343,13 +439,22 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Panel title="终端系统（Top 10 / 近 7 天）">
-          <DistTable data={osDist} emptyHint="暂无 OS 数据（需 SDK 上报 contexts.os 或 tags.device_id）" />
+          <DistTable
+            data={osDist}
+            emptyHint="暂无 OS 数据（需 SDK 上报 contexts.os 或 tags.device_id）"
+          />
         </Panel>
         <Panel title="国家/地区（Top 10 / 近 7 天）">
-          <DistTable data={countryDist} emptyHint="暂无国家分布（需要配置 GeoIP mmdb）" />
+          <DistTable
+            data={countryDist}
+            emptyHint="暂无国家分布（需要配置 GeoIP mmdb）"
+          />
         </Panel>
         <Panel title="运营商/组织（Top 10 / 近 7 天）">
-          <DistTable data={operatorDist} emptyHint="暂无运营商分布（需要配置 GeoIP ASN mmdb）" />
+          <DistTable
+            data={operatorDist}
+            emptyHint="暂无运营商分布（需要配置 GeoIP ASN mmdb）"
+          />
         </Panel>
       </div>
 
@@ -397,18 +502,24 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
                     end={funnelEnd}
                     onStartChange={(nextStart) => {
                       setFunnelStart(nextStart);
-                      const nextDays = clampFunnelDays(getRangeDays(nextStart, funnelEnd, funnelDays));
+                      const nextDays = clampFunnelDays(
+                        getRangeDays(nextStart, funnelEnd, funnelDays),
+                      );
                       setFunnelDays(nextDays);
                       saveFunnelDays(nextDays);
                     }}
                     onEndChange={(nextEnd) => {
                       setFunnelEnd(nextEnd);
-                      const nextDays = clampFunnelDays(getRangeDays(funnelStart, nextEnd, funnelDays));
+                      const nextDays = clampFunnelDays(
+                        getRangeDays(funnelStart, nextEnd, funnelDays),
+                      );
                       setFunnelDays(nextDays);
                       saveFunnelDays(nextDays);
                     }}
                     onRangePresetChange={(nextStart, nextEnd) => {
-                      const nextDays = clampFunnelDays(getRangeDays(nextStart, nextEnd, funnelDays));
+                      const nextDays = clampFunnelDays(
+                        getRangeDays(nextStart, nextEnd, funnelDays),
+                      );
                       setFunnelDays(nextDays);
                       saveFunnelDays(nextDays);
                     }}
@@ -428,7 +539,8 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
                         if (!settings.token || !settings.projectId) return;
 
                         const rangeDays = clampFunnelDays(funnelDays);
-                        const trackRetention = cleanupPolicy?.track_events_retention_days ?? 0;
+                        const trackRetention =
+                          cleanupPolicy?.track_events_retention_days ?? 0;
                         if (trackRetention > 0 && rangeDays > trackRetention) {
                           setErr(
                             `漏斗时间范围=${rangeDays} 天，但分析事件保留=${trackRetention} 天；会导致漏斗明细不足无法保证精确。请在“概览-自动清理”把“分析事件保留(天)”调到 ≥ ${rangeDays}，或把漏斗时间范围调到 ≤ ${trackRetention}。`,
@@ -437,11 +549,15 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
                         }
 
                         const rangeStart =
-                          funnelStart && !Number.isNaN(new Date(funnelStart).getTime())
+                          funnelStart &&
+                          !Number.isNaN(new Date(funnelStart).getTime())
                             ? new Date(funnelStart)
-                            : new Date(Date.now() - (rangeDays - 1) * 24 * 3600 * 1000);
+                            : new Date(
+                                Date.now() - (rangeDays - 1) * 24 * 3600 * 1000,
+                              );
                         const rangeEnd =
-                          funnelEnd && !Number.isNaN(new Date(funnelEnd).getTime())
+                          funnelEnd &&
+                          !Number.isNaN(new Date(funnelEnd).getTime())
                             ? new Date(funnelEnd)
                             : new Date();
                         const res = await getFunnel(settings, {
@@ -465,7 +581,8 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
               </div>
               {cleanupPolicy?.track_events_retention_days ? (
                 <div className="mt-2 text-xs text-zinc-500">
-                  分析事件保留：{cleanupPolicy.track_events_retention_days} 天（漏斗依赖该明细；过短会无法精确计算）
+                  分析事件保留：{cleanupPolicy.track_events_retention_days}{" "}
+                  天（漏斗依赖该明细；过短会无法精确计算）
                 </div>
               ) : (
                 <div className="mt-2 text-xs text-zinc-500">
@@ -482,7 +599,10 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
   );
 }
 
-function DistTable(props: { data: DistributionResponse | null; emptyHint: string }) {
+function DistTable(props: {
+  data: DistributionResponse | null;
+  emptyHint: string;
+}) {
   const items = props.data?.items ?? [];
   if (!props.data) {
     return <div className="text-sm text-zinc-500">加载中...</div>;
@@ -499,7 +619,10 @@ function DistTable(props: { data: DistributionResponse | null; emptyHint: string
       <div className="space-y-2">
         {items.map((it) => (
           <div key={it.key} className="flex items-center gap-3">
-            <div className="w-32 shrink-0 truncate text-sm text-zinc-200" title={it.key}>
+            <div
+              className="w-32 shrink-0 truncate text-sm text-zinc-200"
+              title={it.key}
+            >
               {it.key}
             </div>
             <div className="h-2 flex-1 overflow-hidden rounded bg-zinc-900">
@@ -508,7 +631,9 @@ function DistTable(props: { data: DistributionResponse | null; emptyHint: string
                 style={{ width: `${Math.round((it.count / max) * 100)}%` }}
               />
             </div>
-            <div className="w-12 text-right font-mono text-xs text-zinc-400">{it.count}</div>
+            <div className="w-12 text-right font-mono text-xs text-zinc-400">
+              {it.count}
+            </div>
           </div>
         ))}
       </div>
@@ -553,9 +678,12 @@ function RetentionTable(props: { data: RetentionResponse | null }) {
                 </td>
                 {days.map((d) => {
                   const p = r.points.find((x) => x.day === d);
-                  const pct = Math.round(((p?.rate ?? 0) * 1000)) / 10;
+                  const pct = Math.round((p?.rate ?? 0) * 1000) / 10;
                   return (
-                    <td key={d} className="py-2 pr-4 font-mono text-xs text-zinc-200">
+                    <td
+                      key={d}
+                      className="py-2 pr-4 font-mono text-xs text-zinc-200"
+                    >
                       {pct}%
                     </td>
                   );
@@ -575,12 +703,17 @@ function TopEventsTable(props: { data: TopEventsResponse | null }) {
   }
   const items = props.data.items ?? [];
   if (items.length === 0) {
-    return <div className="text-sm text-zinc-500">暂无事件（先通过 /logs/ 上报）</div>;
+    return (
+      <div className="text-sm text-zinc-500">
+        暂无事件（先通过 /logs/ 上报）
+      </div>
+    );
   }
   return (
     <div className="space-y-2">
       <div className="text-xs text-zinc-500">
-        Top {items.length}（{props.data.start.slice(0, 10)} ~ {props.data.end.slice(0, 10)}）
+        Top {items.length}（{props.data.start.slice(0, 10)} ~{" "}
+        {props.data.end.slice(0, 10)}）
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
@@ -595,12 +728,19 @@ function TopEventsTable(props: { data: TopEventsResponse | null }) {
             {items.slice(0, 10).map((it) => (
               <tr key={it.name} className="hover:bg-zinc-900/40">
                 <td className="py-2 pr-4 text-zinc-100">
-                  <span className="block max-w-[28rem] truncate" title={it.name}>
+                  <span
+                    className="block max-w-[28rem] truncate"
+                    title={it.name}
+                  >
                     {it.name}
                   </span>
                 </td>
-                <td className="py-2 pr-4 font-mono text-xs text-zinc-300">{it.events}</td>
-                <td className="py-2 pr-4 font-mono text-xs text-zinc-300">{it.users}</td>
+                <td className="py-2 pr-4 font-mono text-xs text-zinc-300">
+                  {it.events}
+                </td>
+                <td className="py-2 pr-4 font-mono text-xs text-zinc-300">
+                  {it.users}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -631,11 +771,13 @@ function FunnelTable(props: { data: FunnelResponse | null }) {
         </thead>
         <tbody className="divide-y divide-zinc-900">
           {steps.map((s, idx) => {
-            const pct = Math.round((s.conversion * 1000)) / 10;
+            const pct = Math.round(s.conversion * 1000) / 10;
             return (
               <tr key={`${idx}-${s.name}`} className="hover:bg-zinc-900/40">
                 <td className="py-2 pr-4 text-zinc-100">{s.name}</td>
-                <td className="py-2 pr-4 font-mono text-xs text-zinc-300">{s.users}</td>
+                <td className="py-2 pr-4 font-mono text-xs text-zinc-300">
+                  {s.users}
+                </td>
                 <td className="py-2 pr-4 font-mono text-xs text-zinc-200">
                   {idx === 0 ? "100%" : `${pct}%`}
                 </td>
@@ -661,7 +803,69 @@ function buildRangeFromDays(days: number): { start: string; end: string } {
   };
 }
 
-function getRangeDays(startIso: string, endIso: string, fallbackDays: number): number {
+function buildUserGrowthRange(): { start: string; end: string } {
+  const end = new Date();
+  const start = new Date(
+    Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - 5, 1),
+  );
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+function buildDailyNewUsers(
+  data: UserGrowthResponse,
+  days: number,
+): { day: string; new_users: number }[] {
+  const byDay = new Map(
+    (data.series ?? []).map((p) => [p.day.slice(0, 10), p.new_users] as const),
+  );
+  const end = new Date();
+  const endUTC = new Date(
+    Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()),
+  );
+  const out: { day: string; new_users: number }[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(endUTC);
+    d.setUTCDate(endUTC.getUTCDate() - i);
+    const day = formatUTCDate(d);
+    out.push({ day, new_users: byDay.get(day) ?? 0 });
+  }
+  return out;
+}
+
+function buildMonthlyNewUsers(
+  data: UserGrowthResponse,
+  months: number,
+): { month: string; new_users: number }[] {
+  const byMonth = new Map<string, number>();
+  for (const p of data.series ?? []) {
+    const month = p.day.slice(0, 7);
+    byMonth.set(month, (byMonth.get(month) ?? 0) + p.new_users);
+  }
+  const now = new Date();
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const out: { month: string; new_users: number }[] = [];
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(end);
+    d.setUTCMonth(end.getUTCMonth() - i);
+    const month = formatUTCMonth(d);
+    out.push({ month, new_users: byMonth.get(month) ?? 0 });
+  }
+  return out;
+}
+
+function formatUTCDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function formatUTCMonth(d: Date): string {
+  return d.toISOString().slice(0, 7);
+}
+
+function getRangeDays(
+  startIso: string,
+  endIso: string,
+  fallbackDays: number,
+): number {
   const start = new Date(startIso);
   const end = new Date(endIso);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {

@@ -168,6 +168,14 @@ func TestInsertLogsAndTrackEventsBatch_IdempotentRollup(t *testing.T) {
 	if daily.Events != 1 {
 		t.Fatalf("expected rollup events=1, got %d", daily.Events)
 	}
+
+	today, ok, err := GetDBMetricsToday(ctx, db, 1, ts)
+	if err != nil || !ok {
+		t.Fatalf("GetDBMetricsToday: %+v ok=%v err=%v", today, ok, err)
+	}
+	if today.Logs != 1 || today.Events != 1 || today.Users != 1 {
+		t.Fatalf("unexpected today metrics after batch insert: %+v", today)
+	}
 }
 
 func TestUserFirstSeenMaintainedFromLogsAndEvents(t *testing.T) {

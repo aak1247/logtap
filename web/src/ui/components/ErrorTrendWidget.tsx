@@ -3,10 +3,15 @@ import { searchLogs, type LogRow } from "../../lib/api";
 import { Sparkline } from "./Sparkline";
 import type { WidgetProps } from "../widgets/registry";
 
+type ErrorTrendRange = "24h" | "7d";
+
 export function ErrorTrendWidget(props: WidgetProps) {
   const { settings } = props;
+  const [range, setRange] = useState<ErrorTrendRange>("24h");
   const [points, setPoints] = useState<number[]>([]);
-  const [topErrors, setTopErrors] = useState<{ msg: string; count: number }[]>([]);
+  const [topErrors, setTopErrors] = useState<{ msg: string; count: number }[]>(
+    [],
+  );
 
   useEffect(() => {
     if (!settings.token || !settings.projectId) return;
@@ -16,10 +21,12 @@ export function ErrorTrendWidget(props: WidgetProps) {
         const end = new Date();
         const buckets: number[] = [];
         const errors: Map<string, number> = new Map();
+        const bucketCount = range === "24h" ? 24 : 7;
+        const bucketMs = range === "24h" ? 3600000 : 24 * 3600000;
 
-        for (let i = 23; i >= 0; i--) {
-          const bucketEnd = new Date(end.getTime() - i * 3600000);
-          const bucketStart = new Date(bucketEnd.getTime() - 3600000);
+        for (let i = bucketCount - 1; i >= 0; i--) {
+          const bucketEnd = new Date(end.getTime() - i * bucketMs);
+          const bucketStart = new Date(bucketEnd.getTime() - bucketMs);
           try {
             const rows: LogRow[] = await searchLogs(settings, {
               level: "error",
@@ -52,13 +59,36 @@ export function ErrorTrendWidget(props: WidgetProps) {
     return () => {
       cancelled = true;
     };
-  }, [settings.apiBase, settings.token, settings.projectId]);
+  }, [settings.apiBase, settings.token, settings.projectId, range]);
 
   return (
     <div className="space-y-4">
       <div>
-        <div className="text-sm font-medium text-zinc-300">错误趋势 (24h)</div>
-        {points.length > 0 && <Sparkline values={points} width={400} height={60} />}
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="text-sm font-medium text-zinc-300">
+            错误趋势 ({range === "24h" ? "24h" : "7d"})
+          </div>
+          <div className="inline-flex rounded-md border border-zinc-800 p-0.5 text-xs">
+            {(["24h", "7d"] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                className={
+                  "rounded px-2 py-1 " +
+                  (range === item
+                    ? "bg-zinc-800 text-zinc-100"
+                    : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200")
+                }
+                onClick={() => setRange(item)}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        </div>
+        {points.length > 0 && (
+          <Sparkline values={points} width={400} height={60} />
+        )}
       </div>
       {topErrors.length > 0 && (
         <div>

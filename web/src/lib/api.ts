@@ -58,8 +58,15 @@ export type CleanupPolicy = {
 };
 
 export type User = { id: number; email: string };
-export type SelfLogConfig = { project_id: string | number; project_key: string };
-export type LoginResponse = { token: string; user: User; self_log?: SelfLogConfig };
+export type SelfLogConfig = {
+  project_id: string | number;
+  project_key: string;
+};
+export type LoginResponse = {
+  token: string;
+  user: User;
+  self_log?: SelfLogConfig;
+};
 export type BootstrapResponse = {
   token: string;
   user: User;
@@ -300,6 +307,7 @@ export type AggregateResponse = {
 
 export type SearchResult = {
   items: LogRow[];
+  hits?: LogRow[];
   total: number;
   facets?: Record<string, { key: string; count: number }[]>;
 };
@@ -323,7 +331,12 @@ export async function getDetectorHealth(
 export async function getDetectorAggregate(
   s: ApiSettings,
   detectorType: string,
-  params: { projectId?: string; start?: string; end?: string; interval?: string },
+  params: {
+    projectId?: string;
+    start?: string;
+    end?: string;
+    interval?: string;
+  },
 ): Promise<AggregateResponse> {
   const usp = new URLSearchParams();
   if (params.projectId) usp.set("project_id", params.projectId);
@@ -352,10 +365,15 @@ export async function searchUnified(
   if (params.end) usp.set("end", params.end);
   if (params.page) usp.set("page", String(params.page));
   if (params.pageSize) usp.set("pageSize", String(params.pageSize));
-  return fetchJSON(
+  const raw = await fetchJSON<SearchResult & { hits?: LogRow[] }>(
     `${s.apiBase}/api/${s.projectId}/search?${usp.toString()}`,
     s.token,
   );
+  return {
+    ...raw,
+    items: raw.items ?? raw.hits ?? [],
+    total: raw.total ?? 0,
+  };
 }
 
 export type MonitorTestResult = {
@@ -490,7 +508,12 @@ export async function listAnalysisViews(
 
 export async function createAnalysisView(
   s: ApiSettings,
-  req: { name: string; description?: string; analysis_type: string; query: unknown },
+  req: {
+    name: string;
+    description?: string;
+    analysis_type: string;
+    query: unknown;
+  },
 ): Promise<AnalysisView> {
   return fetchJSON(`${s.apiBase}/api/${s.projectId}/analytics/views`, s.token, {
     method: "POST",
@@ -598,11 +621,15 @@ export async function createPropertyDefinition(
     example_values?: string[];
   },
 ): Promise<PropertyDefinition> {
-  return fetchJSON(`${s.apiBase}/api/${s.projectId}/properties/schema`, s.token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  });
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/properties/schema`,
+    s.token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    },
+  );
 }
 
 export async function updatePropertyDefinition(
@@ -651,7 +678,9 @@ export async function getUserGrowth(
   );
 }
 
-export async function getStorageEstimate(s: ApiSettings): Promise<StorageEstimate> {
+export async function getStorageEstimate(
+  s: ApiSettings,
+): Promise<StorageEstimate> {
   return fetchJSON(`${s.apiBase}/api/${s.projectId}/storage/estimate`, s.token);
 }
 
@@ -680,9 +709,7 @@ export async function upsertCleanupPolicy(
   });
 }
 
-export async function runCleanupPolicy(
-  s: ApiSettings,
-): Promise<{
+export async function runCleanupPolicy(s: ApiSettings): Promise<{
   project_id: number;
   logs_deleted: number;
   events_deleted: number;
@@ -733,7 +760,10 @@ export async function getEvent(
   s: ApiSettings,
   eventId: string,
 ): Promise<unknown> {
-  return fetchJSON(`${s.apiBase}/api/${s.projectId}/events/${eventId}`, s.token);
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/events/${eventId}`,
+    s.token,
+  );
 }
 
 export async function getActiveSeries(
@@ -752,7 +782,12 @@ export async function getActiveSeries(
 
 export async function getDistribution(
   s: ApiSettings,
-  params: { dim: "os" | "browser" | "country" | "region" | "city" | "asn_org"; start?: string; end?: string; limit?: number },
+  params: {
+    dim: "os" | "browser" | "country" | "region" | "city" | "asn_org";
+    start?: string;
+    end?: string;
+    limit?: number;
+  },
 ): Promise<DistributionResponse> {
   const usp = new URLSearchParams();
   usp.set("dim", params.dim);
@@ -772,7 +807,8 @@ export async function getRetention(
   const usp = new URLSearchParams();
   if (params?.start) usp.set("start", params.start);
   if (params?.end) usp.set("end", params.end);
-  if (params?.days && params.days.length > 0) usp.set("days", params.days.join(","));
+  if (params?.days && params.days.length > 0)
+    usp.set("days", params.days.join(","));
   const qs = usp.toString();
   return fetchJSON(
     `${s.apiBase}/api/${s.projectId}/analytics/retention${qs ? `?${qs}` : ""}`,
@@ -874,7 +910,9 @@ export async function bootstrap(
   });
 }
 
-export async function getSystemStatus(apiBase: string): Promise<SystemStatusResponse> {
+export async function getSystemStatus(
+  apiBase: string,
+): Promise<SystemStatusResponse> {
   return fetchJSON(`${apiBase}/api/status`, "");
 }
 
@@ -882,7 +920,9 @@ export async function getMe(s: ApiSettings): Promise<{ user: User }> {
   return fetchJSON(`${s.apiBase}/api/me`, s.token);
 }
 
-export async function listProjects(s: ApiSettings): Promise<{ items: Project[] }> {
+export async function listProjects(
+  s: ApiSettings,
+): Promise<{ items: Project[] }> {
   return fetchJSON(`${s.apiBase}/api/projects`, s.token);
 }
 
@@ -930,9 +970,13 @@ export async function revokeProjectKey(
   projectId: string,
   keyId: number,
 ): Promise<{ revoked: boolean }> {
-  return fetchJSON(`${s.apiBase}/api/projects/${projectId}/keys/${keyId}/revoke`, s.token, {
-    method: "POST",
-  });
+  return fetchJSON(
+    `${s.apiBase}/api/projects/${projectId}/keys/${keyId}/revoke`,
+    s.token,
+    {
+      method: "POST",
+    },
+  );
 }
 
 function alertsBase(s: ApiSettings): string {
@@ -992,7 +1036,10 @@ export async function listAlertContactGroups(
   const usp = new URLSearchParams();
   if (params?.type) usp.set("type", params.type);
   const qs = usp.toString();
-  return fetchJSON(`${alertsBase(s)}/contact-groups${qs ? `?${qs}` : ""}`, s.token);
+  return fetchJSON(
+    `${alertsBase(s)}/contact-groups${qs ? `?${qs}` : ""}`,
+    s.token,
+  );
 }
 
 export async function createAlertContactGroup(
@@ -1087,20 +1134,28 @@ export async function updateAlertWebhookEndpoint(
   endpointId: number,
   req: { name?: string; url?: string },
 ): Promise<AlertWebhookEndpoint> {
-  return fetchJSON(`${alertsBase(s)}/webhook-endpoints/${endpointId}`, s.token, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  });
+  return fetchJSON(
+    `${alertsBase(s)}/webhook-endpoints/${endpointId}`,
+    s.token,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    },
+  );
 }
 
 export async function deleteAlertWebhookEndpoint(
   s: ApiSettings,
   endpointId: number,
 ): Promise<{ deleted: boolean }> {
-  return fetchJSON(`${alertsBase(s)}/webhook-endpoints/${endpointId}`, s.token, {
-    method: "DELETE",
-  });
+  return fetchJSON(
+    `${alertsBase(s)}/webhook-endpoints/${endpointId}`,
+    s.token,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export async function listAlertRules(
@@ -1180,12 +1235,25 @@ export async function testAlertRuleDeliveries(
     message?: string;
     fields?: Record<string, unknown>;
   },
-): Promise<{ created: number; items: { id: number; ruleId: number; channelType: string; target: string; title: string }[] }> {
-  return fetchJSON(`${alertsBase(s)}/rules/${ruleId}/test-deliveries`, s.token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  });
+): Promise<{
+  created: number;
+  items: {
+    id: number;
+    ruleId: number;
+    channelType: string;
+    target: string;
+    title: string;
+  }[];
+}> {
+  return fetchJSON(
+    `${alertsBase(s)}/rules/${ruleId}/test-deliveries`,
+    s.token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    },
+  );
 }
 
 export async function listAlertDeliveries(
@@ -1200,7 +1268,8 @@ export async function listAlertDeliveries(
   const usp = new URLSearchParams();
   if (params?.status) usp.set("status", params.status);
   if (params?.channelType) usp.set("channelType", params.channelType);
-  if (params?.ruleId && params.ruleId > 0) usp.set("ruleId", String(params.ruleId));
+  if (params?.ruleId && params.ruleId > 0)
+    usp.set("ruleId", String(params.ruleId));
   if (params?.limit && params.limit > 0) usp.set("limit", String(params.limit));
   const qs = usp.toString();
   return fetchJSON(`${alertsBase(s)}/deliveries${qs ? `?${qs}` : ""}`, s.token);
@@ -1209,8 +1278,15 @@ export async function listAlertDeliveries(
 export async function listDetectors(
   s: ApiSettings,
 ): Promise<{ items: DetectorDescriptor[] }> {
-  const raw = await fetchJSON<{ items?: unknown[] }>(`${s.apiBase}/api/plugins/detectors`, s.token);
-  const items = Array.isArray(raw.items) ? raw.items.map(normalizeDetectorDescriptor).filter((v): v is DetectorDescriptor => Boolean(v)) : [];
+  const raw = await fetchJSON<{ items?: unknown[] }>(
+    `${s.apiBase}/api/plugins/detectors`,
+    s.token,
+  );
+  const items = Array.isArray(raw.items)
+    ? raw.items
+        .map(normalizeDetectorDescriptor)
+        .filter((v): v is DetectorDescriptor => Boolean(v))
+    : [];
   return { items };
 }
 
@@ -1292,7 +1368,10 @@ export async function listMonitorRuns(
   const usp = new URLSearchParams();
   if (params?.limit && params.limit > 0) usp.set("limit", String(params.limit));
   const qs = usp.toString();
-  return fetchJSON(`${monitorsBase(s)}/${monitorId}/runs${qs ? `?${qs}` : ""}`, s.token);
+  return fetchJSON(
+    `${monitorsBase(s)}/${monitorId}/runs${qs ? `?${qs}` : ""}`,
+    s.token,
+  );
 }
 
 function normalizeDetectorDescriptor(raw: unknown): DetectorDescriptor | null {
@@ -1319,8 +1398,7 @@ function handleUnauthorized() {
   if (typeof window === "undefined") return;
   try {
     clearAuth();
-  } catch {
-  }
+  } catch {}
   if (window.location.pathname !== "/login") {
     window.location.href = "/login";
   }
@@ -1354,12 +1432,20 @@ async function fetchJSON<T>(
 
   const payload = isJSON ? parseJSON() : undefined;
   const env =
-    payload && typeof payload === "object" && payload !== null && "code" in payload
+    payload &&
+    typeof payload === "object" &&
+    payload !== null &&
+    "code" in payload
       ? (payload as ApiEnvelope<T>)
       : undefined;
 
   if (!res.ok) {
-    const msg = env?.err || (typeof payload === "object" && payload && "err" in payload ? String((payload as any).err) : "") || text;
+    const msg =
+      env?.err ||
+      (typeof payload === "object" && payload && "err" in payload
+        ? String((payload as any).err)
+        : "") ||
+      text;
     throw new Error(`${res.status} ${res.statusText}${msg ? `: ${msg}` : ""}`);
   }
 
@@ -1370,5 +1456,5 @@ async function fetchJSON<T>(
     return env.data as T;
   }
 
-  return (isJSON ? (payload as T) : (text as unknown as T));
+  return isJSON ? (payload as T) : (text as unknown as T);
 }

@@ -38,29 +38,29 @@ type Pagination struct {
 }
 
 type SearchResult struct {
-	Total  int64
-	Hits   []SearchHit
-	Facets map[string]Facet
+	Total  int64            `json:"total"`
+	Hits   []SearchHit      `json:"hits"`
+	Facets map[string]Facet `json:"facets,omitempty"`
 }
 
 type SearchHit struct {
-	ID        any
-	Type      string // "log" | "event" | "error"
-	Timestamp time.Time
-	Level     string
-	Message   string
-	Fields    map[string]any
-	Highlight map[string][]string
+	ID        any                 `json:"id"`
+	Type      string              `json:"type"` // "log" | "event" | "error"
+	Timestamp time.Time           `json:"timestamp"`
+	Level     string              `json:"level,omitempty"`
+	Message   string              `json:"message"`
+	Fields    map[string]any      `json:"fields,omitempty"`
+	Highlight map[string][]string `json:"highlight,omitempty"`
 }
 
 type Facet struct {
-	Field   string
-	Buckets []FacetBucket
+	Field   string        `json:"field"`
+	Buckets []FacetBucket `json:"buckets"`
 }
 
 type FacetBucket struct {
-	Key   string
-	Count int64
+	Key   string `json:"key"`
+	Count int64  `json:"count"`
 }
 
 // SearchAdapter is the core adapter interface. Implementations translate

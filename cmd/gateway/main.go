@@ -104,6 +104,19 @@ func main() {
 		}
 		defer rdb.Close()
 		recorder = metrics.NewRedisRecorder(rdb, metrics.WithTTLs(cfg.MetricsDayTTL, cfg.MetricsDistTTL, cfg.MetricsMonthTTL))
+		if gdb != nil && cfg.MetricsActiveWarmupDays > 0 {
+			go func() {
+				warmCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+				defer cancel()
+				if err := recorder.WarmActiveUsersFromDB(warmCtx, gdb, metrics.ActiveWarmupOptions{
+					Days:      cfg.MetricsActiveWarmupDays,
+					Months:    cfg.MetricsActiveWarmupMonths,
+					BatchSize: cfg.MetricsActiveWarmupBatchSize,
+				}); err != nil {
+					log.Printf("metrics active warmup: %v", err)
+				}
+			}()
+		}
 	}
 
 	geoip, err := enrich.NewGeoIP(cfg.GeoIPCityMMDB, cfg.GeoIPASNMMDB)

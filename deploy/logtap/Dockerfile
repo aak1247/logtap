@@ -1,5 +1,5 @@
 # Build stage for frontend
-FROM node:22-alpine AS web-build
+FROM node:22-bookworm-slim AS web-build
 WORKDIR /repo
 # Configure npm registry for China
 ENV npm_config_registry=https://registry.npmmirror.com
@@ -10,17 +10,20 @@ COPY docs/ docs/
 RUN cd web && npm run build
 
 # Build stage for Go backend
-FROM golang:1.22 AS go-build
+FROM golang:1.26.1-alpine AS go-build
 WORKDIR /src
 # Configure Go proxy for China
 ENV GOPROXY=https://goproxy.cn,https://goproxy.io,direct \
     GO111MODULE=on
 COPY go.mod go.sum ./
-RUN go mod download
+COPY sdks/go/logtap ./sdks/go/logtap
+COPY vendor ./vendor
 # Ensure geoip directory exists in the build context even if databases are missing
 RUN mkdir -p data/geoip
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/gateway ./cmd/gateway
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOFLAGS=-mod=vendor go build -trimpath -ldflags="-s -w" -o /out/gateway ./cmd/gateway
 
 # Optional build stage: download GeoIP mmdb (MaxMind GeoLite2)
 FROM alpine:3.19 AS geoip

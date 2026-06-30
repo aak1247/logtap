@@ -99,7 +99,10 @@ func (a *PostgresAdapter) Search(ctx context.Context, q search.SearchQuery) (*se
 		Fields    string // jsonb as string
 	}
 	var rows []hitRow
-	selectCols := "id, timestamp, level, trace_id, span_id, message, fields::text AS fields"
+	selectCols := "id, timestamp, level, trace_id, span_id, message, fields"
+	if strings.EqualFold(a.db.Dialector.Name(), "postgres") {
+		selectCols = "id, timestamp, level, trace_id, span_id, message, fields::text AS fields"
+	}
 	if err := qdb.Select(selectCols).
 		Order(order).
 		Offset(q.Pagination.Offset).
@@ -184,7 +187,7 @@ func applyFilter(qdb *gorm.DB, f search.Filter) *gorm.DB {
 	case "in":
 		return qdb.Where(col+" IN ?", f.Value)
 	case "exists":
-		return qdb.Where(col+" IS NOT NULL AND " + col + " != ''")
+		return qdb.Where(col + " IS NOT NULL AND " + col + " != ''")
 	case "not_exists":
 		return qdb.Where(col + " IS NULL OR " + col + " = ''")
 	default:
