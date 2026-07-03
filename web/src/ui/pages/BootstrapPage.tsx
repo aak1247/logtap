@@ -1,19 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { bootstrap, getSystemStatus } from "../../lib/api";
-import {
-  canEditApiBase,
-  isApiBaseLocked,
-  loadSettings,
-  normalizeApiBase,
-  saveSettings,
-} from "../../lib/storage";
+import { loadSettings, saveSettings } from "../../lib/storage";
 import { Panel } from "../components/Panel";
 import { useNavigate } from "react-router-dom";
 
 export function BootstrapPage() {
   const initial = useMemo(() => loadSettings(), []);
   const nav = useNavigate();
-  const [apiBase, setApiBase] = useState(initial.apiBase);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [projectName, setProjectName] = useState("Default");
@@ -22,8 +15,6 @@ export function BootstrapPage() {
   const [statusChecked, setStatusChecked] = useState(false);
   const [statusErr, setStatusErr] = useState("");
   const [actionErr, setActionErr] = useState("");
-  const apiBaseLocked = isApiBaseLocked();
-  const apiBaseEditable = canEditApiBase();
 
   useEffect(() => {
     let cancelled = false;
@@ -32,8 +23,7 @@ export function BootstrapPage() {
         setStatusErr("");
         setActionErr("");
         setStatusChecked(false);
-        const base = normalizeApiBase(apiBase);
-        const s = await getSystemStatus(base);
+        const s = await getSystemStatus(initial.apiBase);
         if (cancelled) return;
         setStatus(s.status);
         setStatusChecked(true);
@@ -51,7 +41,7 @@ export function BootstrapPage() {
     return () => {
       cancelled = true;
     };
-  }, [apiBase, nav]);
+  }, [initial.apiBase, nav]);
 
   const canBootstrap = statusChecked && status === "uninitialized" && !statusErr;
   const err = actionErr || statusErr;
@@ -63,26 +53,6 @@ export function BootstrapPage() {
         <div className="rounded-xl border border-red-900/60 bg-red-950/40 p-4 text-sm text-red-200">
           {err}
         </div>
-      ) : null}
-
-      {apiBaseEditable ? (
-        <Panel title="连接">
-          <label className="block text-xs text-zinc-400">API Base（不要包含 /api）</label>
-          <input
-            value={apiBase}
-            onChange={(e) => {
-              const raw = e.target.value;
-              setApiBase(raw);
-              if (!apiBaseLocked) {
-                const base = normalizeApiBase(raw);
-                const s = loadSettings();
-                if (s.apiBase !== base) saveSettings({ ...s, apiBase: base });
-              }
-            }}
-            placeholder="http://localhost:8080"
-            className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-          />
-        </Panel>
       ) : null}
 
       <Panel title="首次使用（创建管理员 + 默认项目）" right={<div className="text-xs text-zinc-500">仅当系统无用户时可用</div>}>
@@ -122,10 +92,9 @@ export function BootstrapPage() {
               try {
                 setBusy(true);
                 setActionErr("");
-                const base = normalizeApiBase(apiBase);
-                await bootstrap(base, email.trim(), password, projectName.trim() || "Default");
+                await bootstrap(initial.apiBase, email.trim(), password, projectName.trim() || "Default");
                 const cur = loadSettings();
-                saveSettings({ ...cur, apiBase: base, token: "", projectId: "", selfLogProjectId: "", selfLogProjectKey: "" });
+                saveSettings({ ...cur, token: "", projectId: "", selfLogProjectId: "", selfLogProjectKey: "" });
                 nav(`/login?email=${encodeURIComponent(email.trim())}`, { replace: true });
               } catch (e) {
                 setActionErr(e instanceof Error ? e.message : String(e));

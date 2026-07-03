@@ -14,6 +14,8 @@ export function DocsPage() {
   }, [doc.id]);
 
   const groups = groupedDocs();
+  const settings = loadSettings();
+  const baseUrl = settings.apiBase || (typeof window !== "undefined" ? window.location.origin : "");
 
   return (
     <div className="min-h-screen">
@@ -69,7 +71,7 @@ export function DocsPage() {
         </aside>
 
         <section className="rounded-xl border border-zinc-900 bg-zinc-950/40 p-5">
-          <Markdown content={doc.content.replace(/\{\{baseUrl\}\}/g, loadSettings().apiBase || "http://localhost:8080")} />
+          <Markdown content={doc.content.replace(/\{\{baseUrl\}\}/g, baseUrl)} />
         </section>
       </main>
     </div>

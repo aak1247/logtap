@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getSystemStatus, login } from "../../lib/api";
-import {
-  canEditApiBase,
-  isApiBaseLocked,
-  loadSettings,
-  normalizeApiBase,
-  saveSettings,
-} from "../../lib/storage";
+import { loadSettings, saveSettings } from "../../lib/storage";
 import { Panel } from "../components/Panel";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -14,15 +8,12 @@ export function LoginPage() {
   const initial = useMemo(() => loadSettings(), []);
   const nav = useNavigate();
   const loc = useLocation();
-  const [apiBase, setApiBase] = useState(initial.apiBase);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [statusErr, setStatusErr] = useState("");
   const [loginErr, setLoginErr] = useState("");
   const [statusChecked, setStatusChecked] = useState(false);
-  const apiBaseLocked = isApiBaseLocked();
-  const apiBaseEditable = canEditApiBase();
 
   useEffect(() => {
     if (initial.token) nav("/projects");
@@ -41,8 +32,7 @@ export function LoginPage() {
       try {
         setStatusErr("");
         setStatusChecked(false);
-        const base = apiBase.trim().replace(/\/+$/, "");
-        const s = await getSystemStatus(base);
+        const s = await getSystemStatus(initial.apiBase);
         if (cancelled) return;
         setStatusChecked(true);
         if (s.status === "uninitialized") nav("/bootstrap", { replace: true });
@@ -58,7 +48,7 @@ export function LoginPage() {
     return () => {
       cancelled = true;
     };
-  }, [apiBase, initial.token, nav]);
+  }, [initial.apiBase, initial.token, nav]);
 
   const canLogin = statusChecked && !statusErr;
   const err = loginErr || statusErr;
@@ -71,26 +61,6 @@ export function LoginPage() {
           <div className="rounded-xl border border-red-900/60 bg-red-950/40 p-4 text-sm text-red-200">
             {err}
           </div>
-        ) : null}
-
-        {apiBaseEditable ? (
-          <Panel title="连接">
-            <label className="block text-xs text-zinc-400">API Base（不要包含 /api）</label>
-            <input
-              value={apiBase}
-              onChange={(e) => {
-                const raw = e.target.value;
-                setApiBase(raw);
-                if (!apiBaseLocked) {
-                  const base = normalizeApiBase(raw);
-                  const s = loadSettings();
-                  if (s.apiBase !== base) saveSettings({ ...s, apiBase: base });
-                }
-              }}
-              placeholder="http://localhost:8080"
-              className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-            />
-          </Panel>
         ) : null}
 
         <Panel title="账号">
@@ -122,11 +92,10 @@ export function LoginPage() {
                   try {
                     setBusy(true);
                     setLoginErr("");
-                    const base = normalizeApiBase(apiBase);
-                    const res = await login(base, email.trim(), password);
+                    const res = await login(initial.apiBase, email.trim(), password);
                     const cur = loadSettings();
                     saveSettings({
-                      apiBase: base,
+                      apiBase: cur.apiBase,
                       token: res.token,
                       projectId: "",
                       selfLogProjectId: res.self_log

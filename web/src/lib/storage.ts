@@ -11,35 +11,6 @@ const settingsChangedEvent = "logtap:settings-changed";
 
 let cachedSettings: Settings | null = null;
 
-function envBool(value: unknown): boolean {
-  if (typeof value !== "string") return false;
-  switch (value.trim().toLowerCase()) {
-    case "1":
-    case "true":
-    case "yes":
-    case "on":
-      return true;
-    default:
-      return false;
-  }
-}
-
-export type ApiBaseLockMode = "off" | "once" | "always";
-
-export function getApiBaseLockMode(): ApiBaseLockMode {
-  const raw = ((import.meta.env.VITE_LOCK_API_BASE as string | undefined) ?? "")
-    .trim()
-    .toLowerCase();
-  if (!raw) return "off";
-  if (raw === "always") return "always";
-  if (raw === "once" || envBool(raw)) return "once";
-  return "off";
-}
-
-export function isApiBaseLocked(): boolean {
-  return getApiBaseLockMode() !== "off";
-}
-
 export function normalizeApiBase(raw: string): string {
   let base = raw.trim();
   if (base && !base.includes("://") && !base.startsWith("/")) {
@@ -72,29 +43,18 @@ function readStoredSettingsRaw(): string | null {
   return localStorage.getItem(key);
 }
 
-export function canEditApiBase(): boolean {
-  const mode = getApiBaseLockMode();
-  if (mode === "off") return true;
-  if (mode === "always") return false;
-  const raw = readStoredSettingsRaw();
-  if (!raw) return true;
-  try {
-    const parsed = JSON.parse(raw) as Partial<Settings>;
-    return !parsed.apiBase;
-  } catch {
-    return true;
-  }
+function configuredApiBase(): string {
+  const envApiBase = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
+  return normalizeApiBase(envApiBase);
 }
 
 export function loadSettings(): Settings {
-  const lockMode = getApiBaseLockMode();
-  const envApiBase = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
   const projectId =
     (import.meta.env.VITE_DEFAULT_PROJECT_ID as string | undefined) ?? "";
-  const fallbackApiBase = normalizeApiBase(envApiBase || "http://localhost:8080");
+  const apiBase = configuredApiBase();
 
   if (typeof window === "undefined") {
-    const next = { apiBase: fallbackApiBase, token: "", projectId, selfLogProjectId: "", selfLogProjectKey: "" };
+    const next = { apiBase, token: "", projectId, selfLogProjectId: "", selfLogProjectKey: "" };
     if (cachedSettings && sameSettings(cachedSettings, next)) return cachedSettings;
     cachedSettings = next;
     return next;
@@ -104,7 +64,7 @@ export function loadSettings(): Settings {
     const raw = readStoredSettingsRaw();
     if (!raw) {
       const next = {
-        apiBase: fallbackApiBase,
+        apiBase,
         token: "",
         projectId,
         selfLogProjectId: "",
@@ -116,10 +76,7 @@ export function loadSettings(): Settings {
     }
     const parsed = JSON.parse(raw) as Partial<Settings>;
     const next = {
-      apiBase:
-        lockMode === "always"
-          ? fallbackApiBase
-          : normalizeApiBase(parsed.apiBase || fallbackApiBase),
+      apiBase,
       token: parsed.token || "",
       projectId: parsed.projectId || projectId,
       selfLogProjectId: parsed.selfLogProjectId || "",
@@ -129,7 +86,7 @@ export function loadSettings(): Settings {
     cachedSettings = next;
     return next;
   } catch {
-    const next = { apiBase: fallbackApiBase, token: "", projectId, selfLogProjectId: "", selfLogProjectKey: "" };
+    const next = { apiBase, token: "", projectId, selfLogProjectId: "", selfLogProjectKey: "" };
     if (cachedSettings && sameSettings(cachedSettings, next)) return cachedSettings;
     cachedSettings = next;
     return next;
@@ -143,24 +100,9 @@ function notifySettingsChanged() {
 
 export function saveSettings(next: Settings) {
   try {
-    let apiBase = next.apiBase;
-    const lockMode = getApiBaseLockMode();
-    const envApiBase = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
-    if (lockMode === "always") {
-      apiBase = normalizeApiBase(envApiBase || "http://localhost:8080");
-    } else if (lockMode === "once") {
-      const raw = readStoredSettingsRaw();
-      if (raw) {
-        try {
-          const parsed = JSON.parse(raw) as Partial<Settings>;
-          if (parsed.apiBase) apiBase = parsed.apiBase;
-        } catch {
-        }
-      }
-    }
     const normalized = {
       ...next,
-      apiBase: normalizeApiBase(apiBase),
+      apiBase: configuredApiBase(),
     };
     const key = getSettingsStorageKey();
     localStorage.setItem(key, JSON.stringify(normalized));

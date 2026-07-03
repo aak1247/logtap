@@ -18,19 +18,12 @@ import {
   type ProjectKey,
 } from "../../lib/api";
 import { clampFunnelDays, loadFunnelDays } from "../../lib/prefs";
-import {
-  canEditApiBase,
-  clearAuth,
-  loadSettings,
-  normalizeApiBase,
-  saveSettings,
-} from "../../lib/storage";
+import { clearAuth, loadSettings, saveSettings } from "../../lib/storage";
 import { Panel } from "../components/Panel";
 import type { ApiSettings, EventDefinition, PropertyDefinition } from "../../lib/api";
 import { listEventDefinitions, createEventDefinition, updateEventDefinition, listPropertyDefinitions, createPropertyDefinition, updatePropertyDefinition } from "../../lib/api";
 
 const SETTINGS_SECTIONS = [
-  { id: "connection", label: "连接设置" },
   { id: "project", label: "项目设置" },
   { id: "plugins", label: "插件设置" },
   { id: "cleanup", label: "清理设置" },
@@ -44,10 +37,8 @@ export function SettingsPage() {
   const nav = useNavigate();
   const loc = useLocation();
   const funnelDays = useMemo(() => clampFunnelDays(loadFunnelDays()), []);
-  const apiBaseEditable = canEditApiBase();
 
   const [settings, setSettings] = useState(() => loadSettings());
-  const [apiBase, setApiBase] = useState(settings.apiBase);
 
   const [keys, setKeys] = useState<ProjectKey[]>([]);
   const [newKeyName, setNewKeyName] = useState("default");
@@ -71,12 +62,11 @@ export function SettingsPage() {
   );
 
   const params = useParams<{ section?: string }>();
-  const activeSection: SettingsSectionId = (SETTINGS_SECTIONS.find((s) => s.id === params.section)?.id ?? "connection");
+  const activeSection: SettingsSectionId = (SETTINGS_SECTIONS.find((s) => s.id === params.section)?.id ?? "project");
 
   useEffect(() => {
     const next = loadSettings();
     setSettings(next);
-    setApiBase(next.apiBase);
   }, [loc.key]);
 
   useEffect(() => {
@@ -96,6 +86,12 @@ export function SettingsPage() {
       nav("/projects");
     }
   }, [settings.token, settings.projectId, nav]);
+
+  useEffect(() => {
+    if (params.section && !SETTINGS_SECTIONS.some((s) => s.id === params.section)) {
+      nav("/settings/project", { replace: true });
+    }
+  }, [params.section, nav]);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,8 +127,9 @@ export function SettingsPage() {
     };
   }, [settings.apiBase, settings.token, settings.projectId]);
 
+  const displayApiBase = effectiveApiBase(settings.apiBase);
   const ingestURL = settings.projectId
-    ? `${settings.apiBase.replace(/\/+$/, "")}/api/${settings.projectId}`
+    ? `${displayApiBase.replace(/\/+$/, "")}/api/${settings.projectId}`
     : "";
   const firstKey = keys.find((k) => !k.revoked_at)?.key ?? "";
 
@@ -205,50 +202,6 @@ export function SettingsPage() {
         </aside>
 
         <main className="flex-1 space-y-6 min-w-0">
-      {activeSection === "connection" && apiBaseEditable ? (
-        <Panel title="连接设置">
-          <label className="block text-xs text-zinc-400">API Base（不要包含 /api）</label>
-          <input
-            value={apiBase}
-            onChange={(e) => setApiBase(e.target.value)}
-            placeholder="http://localhost:8080"
-            className="mt-2 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-          />
-          <div className="mt-2 text-xs text-zinc-500">
-            将会自动规范化：<span className="font-mono">{normalizeApiBase(apiBase)}</span>
-          </div>
-
-          <div className="mt-4 flex items-center justify-between">
-            <button
-              className="text-xs text-zinc-400 hover:text-zinc-200"
-              onClick={() => {
-                const s = loadSettings();
-                setSettings(s);
-                setApiBase(s.apiBase);
-              }}
-            >
-              重置
-            </button>
-            <button
-              className="btn btn-md btn-primary"
-              onClick={() => {
-                const s = loadSettings();
-                saveSettings({
-                  apiBase: apiBase.trim(),
-                  token: s.token,
-                  projectId: s.projectId,
-                  selfLogProjectId: s.selfLogProjectId,
-                  selfLogProjectKey: s.selfLogProjectKey,
-                });
-                window.location.reload();
-              }}
-            >
-              保存
-            </button>
-          </div>
-        </Panel>
-      ) : null}
-
       {activeSection === "project" ? (
         <Panel title="项目设置">
           {projectErr ? (
@@ -261,8 +214,6 @@ export function SettingsPage() {
             <div className="rounded-lg border border-zinc-900 p-3">
               <div className="text-xs text-zinc-500">Project ID</div>
               <div className="mt-1 font-mono text-xs text-zinc-100">{settings.projectId}</div>
-              <div className="mt-2 text-xs text-zinc-500">API Base</div>
-              <div className="mt-1 font-mono text-xs text-zinc-300">{settings.apiBase}</div>
             </div>
 
             {settings.selfLogProjectId ? (
@@ -292,7 +243,7 @@ export function SettingsPage() {
                 />
                 <CodeBlock
                   title="Sentry DSN（可用于 SDK）"
-                  text={`DSN: ${formatDSN(settings.apiBase, settings.projectId, firstKey || "pk_xxx")}\nPOST: ${ingestURL}/envelope/`}
+                  text={`DSN: ${formatDSN(displayApiBase, settings.projectId, firstKey || "pk_xxx")}\nPOST: ${ingestURL}/envelope/`}
                 />
               </div>
             </div>
@@ -1254,8 +1205,15 @@ function formatDSN(apiBase: string, projectId: string, key: string) {
     const u = new URL(apiBase);
     return `${u.protocol}//${encodeURIComponent(key)}@${u.host}/${projectId}`;
   } catch {
-    return `http://${key}@localhost:8080/${projectId}`;
+    return `${encodeURIComponent(key)}@/${projectId}`;
   }
+}
+
+function effectiveApiBase(apiBase: string): string {
+  const normalized = apiBase.replace(/\/+$/, "");
+  if (normalized) return normalized;
+  if (typeof window !== "undefined" && window.location.origin) return window.location.origin;
+  return "";
 }
 
 function toDateTimeLocal(d: Date): string {
