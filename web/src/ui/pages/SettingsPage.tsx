@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   cleanupEventsBefore,
   cleanupLogsBefore,
   createProjectKey,
   getCleanupPolicy,
+  getPluginPackageSetting,
+  listPluginPackages,
   listProjectKeys,
   revokeProjectKey,
   runCleanupPolicy,
   upsertCleanupPolicy,
+  upsertPluginPackageSetting,
   type CleanupPolicy,
+  type PluginPackage,
+  type PluginPackageSetting,
   type ProjectKey,
 } from "../../lib/api";
 import { clampFunnelDays, loadFunnelDays } from "../../lib/prefs";
@@ -23,6 +28,17 @@ import {
 import { Panel } from "../components/Panel";
 import type { ApiSettings, EventDefinition, PropertyDefinition } from "../../lib/api";
 import { listEventDefinitions, createEventDefinition, updateEventDefinition, listPropertyDefinitions, createPropertyDefinition, updatePropertyDefinition } from "../../lib/api";
+
+const SETTINGS_SECTIONS = [
+  { id: "connection", label: "连接设置" },
+  { id: "project", label: "项目设置" },
+  { id: "plugins", label: "插件设置" },
+  { id: "cleanup", label: "清理设置" },
+  { id: "events", label: "事件定义" },
+  { id: "properties", label: "属性定义" },
+] as const;
+
+type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 
 export function SettingsPage() {
   const nav = useNavigate();
@@ -54,6 +70,9 @@ export function SettingsPage() {
     toDateTimeLocal(new Date(Date.now() - 30 * 24 * 3600 * 1000)),
   );
 
+  const params = useParams<{ section?: string }>();
+  const activeSection: SettingsSectionId = (SETTINGS_SECTIONS.find((s) => s.id === params.section)?.id ?? "connection");
+
   useEffect(() => {
     const next = loadSettings();
     setSettings(next);
@@ -67,18 +86,6 @@ export function SettingsPage() {
     setCleanupMsg("");
     setProjectErr("");
   }, [settings.projectId]);
-
-  useEffect(() => {
-    if (loc.hash === "#cleanup") {
-      window.setTimeout(() => {
-        document.getElementById("cleanup")?.scrollIntoView({ block: "start" });
-      }, 0);
-    } else if (loc.hash === "#project") {
-      window.setTimeout(() => {
-        document.getElementById("project")?.scrollIntoView({ block: "start" });
-      }, 0);
-    }
-  }, [loc.hash]);
 
   useEffect(() => {
     if (!settings.token) {
@@ -156,14 +163,9 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between">
-        <div>
-          <div className="text-lg font-semibold">设置</div>
-          <div className="mt-1 text-sm text-zinc-400">
-            API：{settings.apiBase} / 项目：{settings.projectId || "—"}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="text-lg font-semibold">设置</div>
+        <div className="flex flex-wrap items-center gap-2">
           <Link
             to="/projects"
             className="btn btn-md btn-outline"
@@ -182,7 +184,31 @@ export function SettingsPage() {
         </div>
       </div>
 
-      {apiBaseEditable ? (
+      <div className="flex flex-col gap-4 lg:flex-row">
+        <aside className="border-b border-zinc-900 pb-3 lg:w-52 lg:shrink-0 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-4">
+          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 lg:px-2">
+            设置
+          </div>
+          <nav className="mt-3 flex flex-wrap gap-2 text-sm lg:flex-col lg:gap-1">
+            {SETTINGS_SECTIONS.map((s) => (
+              <NavLink
+                key={s.id}
+                to={`/settings/${s.id}`}
+                className={({ isActive }) =>
+                  "block min-w-[6.5rem] max-w-full rounded-md px-3 py-2 text-left leading-snug transition-colors lg:w-full lg:min-w-0 " +
+                  (isActive && activeSection === s.id
+                    ? "bg-zinc-800 text-zinc-50"
+                    : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100")
+                }
+              >
+                <span className="whitespace-normal break-words">{s.label}</span>
+              </NavLink>
+            ))}
+          </nav>
+        </aside>
+
+        <main className="flex-1 space-y-6 min-w-0">
+      {activeSection === "connection" && apiBaseEditable ? (
         <Panel title="连接设置">
           <label className="block text-xs text-zinc-400">API Base（不要包含 /api）</label>
           <input
@@ -226,181 +252,186 @@ export function SettingsPage() {
         </Panel>
       ) : null}
 
-      <div id="project" className="scroll-mt-24" />
-      <Panel title="项目设置">
-        {projectErr ? (
-          <div className="mb-3 rounded-md border border-red-900/60 bg-red-950/40 p-3 text-xs text-red-200">
-            {projectErr}
-          </div>
-        ) : null}
-
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border border-zinc-900 p-3">
-            <div className="text-xs text-zinc-500">Project ID</div>
-            <div className="mt-1 font-mono text-xs text-zinc-100">{settings.projectId}</div>
-            <div className="mt-2 text-xs text-zinc-500">API Base</div>
-            <div className="mt-1 font-mono text-xs text-zinc-300">{settings.apiBase}</div>
-          </div>
-
-          {settings.selfLogProjectId ? (
-            <div className="rounded-lg border border-zinc-900 p-3">
-              <div className="text-xs text-zinc-500">System Project（用于控制台/服务自上报）</div>
-              <div className="mt-1 font-mono text-xs text-zinc-100">{settings.selfLogProjectId}</div>
-              <div className="mt-3 flex gap-2">
-                <button
-                  className="btn btn-sm btn-outline"
-                  onClick={() => {
-                    saveSettings({ ...settings, projectId: settings.selfLogProjectId });
-                    nav("/logs");
-                  }}
-                >
-                  切换到系统项目日志
-                </button>
-              </div>
+      {activeSection === "project" ? (
+        <Panel title="项目设置">
+          {projectErr ? (
+            <div className="mb-3 rounded-md border border-red-900/60 bg-red-950/40 p-3 text-xs text-red-200">
+              {projectErr}
             </div>
           ) : null}
 
-          <div className="rounded-lg border border-zinc-900 p-3">
-            <div className="text-sm font-semibold">上报示例（用任一 active Key）</div>
-            <div className="mt-3 space-y-2">
-              <CodeBlock
-                title="自定义日志（推荐）"
-                text={`curl -sS -X POST "${ingestURL}/logs/" \\\n  -H "Content-Type: application/json" \\\n  -H "X-Project-Key: ${firstKey || "pk_xxx"}" \\\n  -d '{"level":"info","message":"signup","user":{"id":"u1"},"fields":{"k":"v"}}'`}
-              />
-              <CodeBlock
-                title="Sentry DSN（可用于 SDK）"
-                text={`DSN: ${formatDSN(settings.apiBase, settings.projectId, firstKey || "pk_xxx")}\nPOST: ${ingestURL}/envelope/`}
-              />
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-zinc-900 p-3">
+              <div className="text-xs text-zinc-500">Project ID</div>
+              <div className="mt-1 font-mono text-xs text-zinc-100">{settings.projectId}</div>
+              <div className="mt-2 text-xs text-zinc-500">API Base</div>
+              <div className="mt-1 font-mono text-xs text-zinc-300">{settings.apiBase}</div>
             </div>
-          </div>
-        </div>
 
-        <div className="mt-4 rounded-lg border border-zinc-900 p-3">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold">上报鉴权 Key</div>
-            <button
-              className="btn btn-sm btn-outline"
-              disabled={projectBusy}
-              onClick={async () => {
-                try {
-                  if (!settings.projectId) return;
-                  const projectId = settings.projectId.trim();
-                  if (!projectId) throw new Error("项目 ID 无效");
-                  setProjectErr("");
-                  setProjectBusy(true);
-                  const k = await createProjectKey(settings, projectId, newKeyName.trim());
-                  setNewKeyName("default");
-                  setKeys((prev) => [...prev, k]);
-                } catch (e) {
-                  setProjectErr(e instanceof Error ? e.message : String(e));
-                } finally {
-                  setProjectBusy(false);
-                }
-              }}
-            >
-              新建 Key
-            </button>
-          </div>
+            {settings.selfLogProjectId ? (
+              <div className="rounded-lg border border-zinc-900 p-3">
+                <div className="text-xs text-zinc-500">System Project（用于控制台/服务自上报）</div>
+                <div className="mt-1 font-mono text-xs text-zinc-100">{settings.selfLogProjectId}</div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    className="btn btn-sm btn-outline"
+                    onClick={() => {
+                      saveSettings({ ...settings, projectId: settings.selfLogProjectId });
+                      nav("/logs");
+                    }}
+                  >
+                    切换到系统项目日志
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
-          <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
-            <div>
-              <div className="text-xs text-zinc-400">Key 名称</div>
-              <input
-                value={newKeyName}
-                onChange={(e) => setNewKeyName(e.target.value)}
-                placeholder="default"
-                className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-100 outline-none focus:border-indigo-500"
-              />
-            </div>
-            <div>
-              <div className="text-xs text-zinc-400">当前可用 Key（示例）</div>
-              <div className="mt-1 truncate rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-200">
-                {firstKey || "(none)"}
+            <div className="rounded-lg border border-zinc-900 p-3">
+              <div className="text-sm font-semibold">上报示例（用任一 active Key）</div>
+              <div className="mt-3 space-y-2">
+                <CodeBlock
+                  title="自定义日志（推荐）"
+                  text={`curl -sS -X POST "${ingestURL}/logs/" \\\n  -H "Content-Type: application/json" \\\n  -H "X-Project-Key: ${firstKey || "pk_xxx"}" \\\n  -d '{"level":"info","message":"signup","user":{"id":"u1"},"fields":{"k":"v"}}'`}
+                />
+                <CodeBlock
+                  title="Sentry DSN（可用于 SDK）"
+                  text={`DSN: ${formatDSN(settings.apiBase, settings.projectId, firstKey || "pk_xxx")}\nPOST: ${ingestURL}/envelope/`}
+                />
               </div>
             </div>
           </div>
 
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="text-xs text-zinc-500">
-                <tr>
-                  <th className="py-2 pr-4">Name</th>
-                  <th className="py-2 pr-4">Key</th>
-                  <th className="py-2 pr-4">Status</th>
-                  <th className="py-2 pr-0" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-900">
-                {keys.map((k) => (
-                  <tr key={k.id} className="hover:bg-zinc-900/40">
-                    <td className="py-2 pr-4 text-zinc-100">{k.name}</td>
-                    <td className="py-2 pr-4 font-mono text-xs text-zinc-300">
-                      <span className="block max-w-[18rem] truncate" title={k.key}>
-                        {k.key}
-                      </span>
-                    </td>
-                    <td className="py-2 pr-4 text-xs text-zinc-400">
-                      {k.revoked_at ? "revoked" : "active"}
-                    </td>
-                    <td className="py-2 pr-0 text-right">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          className="btn btn-xs btn-outline"
-                          disabled={projectBusy}
-                          onClick={async () => {
-                            const ok = await copyText(k.key);
-                            if (!ok) return;
-                            setCopiedKeyId(k.id);
-                            window.setTimeout(() => {
-                              setCopiedKeyId((prev) => (prev === k.id ? null : prev));
-                            }, 1200);
-                          }}
-                        >
-                          {copiedKeyId === k.id ? "已复制" : "复制"}
-                        </button>
-                        {!k.revoked_at ? (
+          <div className="mt-4 rounded-lg border border-zinc-900 p-3">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold">上报鉴权 Key</div>
+              <button
+                className="btn btn-sm btn-outline"
+                disabled={projectBusy}
+                onClick={async () => {
+                  try {
+                    if (!settings.projectId) return;
+                    const projectId = settings.projectId.trim();
+                    if (!projectId) throw new Error("项目 ID 无效");
+                    setProjectErr("");
+                    setProjectBusy(true);
+                    const k = await createProjectKey(settings, projectId, newKeyName.trim());
+                    setNewKeyName("default");
+                    setKeys((prev) => [...prev, k]);
+                  } catch (e) {
+                    setProjectErr(e instanceof Error ? e.message : String(e));
+                  } finally {
+                    setProjectBusy(false);
+                  }
+                }}
+              >
+                新建 Key
+              </button>
+            </div>
+
+            <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+              <div>
+                <div className="text-xs text-zinc-400">Key 名称</div>
+                <input
+                  value={newKeyName}
+                  onChange={(e) => setNewKeyName(e.target.value)}
+                  placeholder="default"
+                  className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-100 outline-none focus:border-indigo-500"
+                />
+              </div>
+              <div>
+                <div className="text-xs text-zinc-400">当前可用 Key（示例）</div>
+                <div className="mt-1 truncate rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-200">
+                  {firstKey || "(none)"}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="text-xs text-zinc-500">
+                  <tr>
+                    <th className="py-2 pr-4">Name</th>
+                    <th className="py-2 pr-4">Key</th>
+                    <th className="py-2 pr-4">Status</th>
+                    <th className="py-2 pr-0" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-900">
+                  {keys.map((k) => (
+                    <tr key={k.id} className="hover:bg-zinc-900/40">
+                      <td className="py-2 pr-4 text-zinc-100">{k.name}</td>
+                      <td className="py-2 pr-4 font-mono text-xs text-zinc-300">
+                        <span className="block max-w-[18rem] truncate" title={k.key}>
+                          {k.key}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-4 text-xs text-zinc-400">
+                        {k.revoked_at ? "revoked" : "active"}
+                      </td>
+                      <td className="py-2 pr-0 text-right">
+                        <div className="flex justify-end gap-2">
                           <button
                             className="btn btn-xs btn-outline"
                             disabled={projectBusy}
                             onClick={async () => {
-                              try {
-                                if (!settings.projectId) return;
-                                const projectId = settings.projectId.trim();
-                                if (!projectId) throw new Error("项目 ID 无效");
-                                setProjectErr("");
-                                setProjectBusy(true);
-                                await revokeProjectKey(settings, projectId, k.id);
-                                const res = await listProjectKeys(settings, projectId);
-                                setKeys(res.items);
-                              } catch (e) {
-                                setProjectErr(e instanceof Error ? e.message : String(e));
-                              } finally {
-                                setProjectBusy(false);
-                              }
+                              const ok = await copyText(k.key);
+                              if (!ok) return;
+                              setCopiedKeyId(k.id);
+                              window.setTimeout(() => {
+                                setCopiedKeyId((prev) => (prev === k.id ? null : prev));
+                              }, 1200);
                             }}
                           >
-                            吊销
+                            {copiedKeyId === k.id ? "已复制" : "复制"}
                           </button>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {keys.length === 0 ? (
-                  <tr>
-                    <td className="py-6 text-sm text-zinc-500" colSpan={4}>
-                      暂无 Key
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
+                          {!k.revoked_at ? (
+                            <button
+                              className="btn btn-xs btn-outline"
+                              disabled={projectBusy}
+                              onClick={async () => {
+                                try {
+                                  if (!settings.projectId) return;
+                                  const projectId = settings.projectId.trim();
+                                  if (!projectId) throw new Error("项目 ID 无效");
+                                  setProjectErr("");
+                                  setProjectBusy(true);
+                                  await revokeProjectKey(settings, projectId, k.id);
+                                  const res = await listProjectKeys(settings, projectId);
+                                  setKeys(res.items);
+                                } catch (e) {
+                                  setProjectErr(e instanceof Error ? e.message : String(e));
+                                } finally {
+                                  setProjectBusy(false);
+                                }
+                              }}
+                            >
+                              吊销
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {keys.length === 0 ? (
+                    <tr>
+                      <td className="py-6 text-sm text-zinc-500" colSpan={4}>
+                        暂无 Key
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      </Panel>
+        </Panel>
+      ) : null}
 
-      <div id="cleanup" className="scroll-mt-24" />
-      <Panel title="清理设置">
+      {activeSection === "plugins" ? (
+        <PluginSettingsPanel settings={settings} />
+      ) : null}
+
+      {activeSection === "cleanup" ? (
+        <Panel title="清理设置">
         {cleanupMsg ? (
           <div className="mb-3 rounded-lg border border-zinc-900 bg-zinc-950/60 p-3 text-sm text-zinc-200">
             {cleanupMsg}
@@ -603,16 +634,257 @@ export function SettingsPage() {
             </div>
           </div>
         </div>
-      </Panel>
+        </Panel>
+      ) : null}
 
-      <Panel title="事件定义（行为管理）">
-        <EventSchemaPanel settings={settings} />
-      </Panel>
+      {activeSection === "events" ? (
+        <Panel title="事件定义（行为管理）">
+          <EventSchemaPanel settings={settings} />
+        </Panel>
+      ) : null}
 
-      <Panel title="属性定义（事件属性／用户属性）">
-        <PropertySchemaPanel settings={settings} />
-      </Panel>
+      {activeSection === "properties" ? (
+        <Panel title="属性定义（事件属性／用户属性）">
+          <PropertySchemaPanel settings={settings} />
+        </Panel>
+      ) : null}
+        </main>
+      </div>
     </div>
+  );
+}
+
+
+function PluginSettingsPanel(props: { settings: ApiSettings }) {
+  const { settings } = props;
+  const [plugins, setPlugins] = useState<PluginPackage[] | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pluginSetting, setPluginSetting] = useState<PluginPackageSetting | null>(null);
+  const [pluginDraft, setPluginDraft] = useState<{
+    enabled: boolean;
+    overviewCardsEnabled: boolean;
+    analyticsTabEnabled: boolean;
+    analysisHours: string;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!settings.token || !settings.projectId) return;
+        const res = await listPluginPackages(settings);
+        if (cancelled) return;
+        setPlugins(res.items ?? []);
+        if (!selectedId && (res.items ?? []).length > 0) {
+          setSelectedId(res.items[0].id);
+        }
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.apiBase, settings.token, settings.projectId]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setPluginSetting(null);
+      setPluginDraft(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!settings.token || !settings.projectId) return;
+        const ps = await getPluginPackageSetting(settings, selectedId).catch(() => null);
+        if (cancelled) return;
+        setPluginSetting(ps);
+        if (ps) {
+          setPluginDraft({
+            enabled: ps.enabled,
+            overviewCardsEnabled: ps.config.overviewCardsEnabled,
+            analyticsTabEnabled: ps.config.analyticsTabEnabled,
+            analysisHours: String(ps.config.analysisHours ?? 24),
+          });
+        }
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.apiBase, settings.token, settings.projectId, selectedId]);
+
+  const isConnectivity = selectedId === "builtin.connectivity";
+
+  return (
+    <Panel title="插件设置">
+      {msg ? (
+        <div className="mb-3 rounded-lg border border-zinc-900 bg-zinc-950/60 p-3 text-sm text-zinc-200">
+          {msg}
+        </div>
+      ) : null}
+      {err ? (
+        <div className="mb-3 rounded-md border border-red-900/60 bg-red-950/40 p-3 text-xs text-red-200">
+          {err}
+        </div>
+      ) : null}
+
+      <div className="mb-4 flex flex-wrap gap-1 border-b border-zinc-900 pb-3">
+        {plugins === null ? (
+          <div className="text-sm text-zinc-500">加载插件列表...</div>
+        ) : plugins.length === 0 ? (
+          <div className="text-sm text-zinc-500">未安装任何插件</div>
+        ) : (
+          plugins.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => {
+                setSelectedId(p.id);
+                setMsg("");
+                setErr("");
+              }}
+              className={`px-3 py-1.5 rounded-md text-xs transition-colors ${
+                selectedId === p.id
+                  ? "bg-zinc-900 text-zinc-100"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50"
+              }`}
+              title={p.id}
+            >
+              {p.name}
+            </button>
+          ))
+        )}
+      </div>
+
+      {!selectedId ? (
+        <div className="text-sm text-zinc-500">请选择一个插件</div>
+      ) : !pluginDraft ? (
+        <div className="text-sm text-zinc-500">未加载插件设置</div>
+      ) : (
+        <div className="rounded-xl border border-zinc-900 bg-zinc-950 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold">
+                {plugins?.find((p) => p.id === selectedId)?.name ?? selectedId}
+              </div>
+              <div className="mt-1 text-xs text-zinc-500">
+                package: <span className="font-mono">{selectedId}</span>
+              </div>
+            </div>
+            <div className="text-xs text-zinc-500">
+              {pluginSetting?.updatedAt
+                ? `更新于 ${new Date(pluginSetting.updatedAt).toLocaleString()}`
+                : "使用默认配置"}
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <label className="flex items-center justify-between gap-3 rounded-lg border border-zinc-900 p-3 text-sm">
+              <span className="text-zinc-300">启用插件包</span>
+              <input
+                type="checkbox"
+                checked={pluginDraft.enabled}
+                onChange={(e) =>
+                  setPluginDraft((prev) =>
+                    prev ? { ...prev, enabled: e.target.checked } : prev,
+                  )
+                }
+              />
+            </label>
+            {isConnectivity ? (
+              <>
+                <label className="flex items-center justify-between gap-3 rounded-lg border border-zinc-900 p-3 text-sm">
+                  <span className="text-zinc-300">显示概览页卡片</span>
+                  <input
+                    type="checkbox"
+                    checked={pluginDraft.overviewCardsEnabled}
+                    onChange={(e) =>
+                      setPluginDraft((prev) =>
+                        prev ? { ...prev, overviewCardsEnabled: e.target.checked } : prev,
+                      )
+                    }
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-3 rounded-lg border border-zinc-900 p-3 text-sm">
+                  <span className="text-zinc-300">显示分析页 Tab</span>
+                  <input
+                    type="checkbox"
+                    checked={pluginDraft.analyticsTabEnabled}
+                    onChange={(e) =>
+                      setPluginDraft((prev) =>
+                        prev ? { ...prev, analyticsTabEnabled: e.target.checked } : prev,
+                      )
+                    }
+                  />
+                </label>
+                <Field
+                  label="默认分析窗口(小时)"
+                  value={pluginDraft.analysisHours}
+                  onChange={(v) =>
+                    setPluginDraft((prev) =>
+                      prev ? { ...prev, analysisHours: v } : prev,
+                    )
+                  }
+                  placeholder="24"
+                />
+              </>
+            ) : (
+              <div className="md:col-span-2 rounded-lg border border-dashed border-zinc-800 p-3 text-xs text-zinc-500">
+                该插件暂未提供专属配置项，仅支持启用/停用。
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex justify-end">
+            <button
+              className="btn btn-md btn-primary"
+              disabled={busy}
+              onClick={async () => {
+                if (!pluginDraft || !selectedId) return;
+                try {
+                  setBusy(true);
+                  setMsg("");
+                  setErr("");
+                  const configPayload = isConnectivity
+                    ? {
+                        overviewCardsEnabled: pluginDraft.overviewCardsEnabled,
+                        analyticsTabEnabled: pluginDraft.analyticsTabEnabled,
+                        analysisHours: Number(pluginDraft.analysisHours || "24"),
+                      }
+                    : {};
+                  const saved = await upsertPluginPackageSetting(settings, selectedId, {
+                    enabled: pluginDraft.enabled,
+                    config: configPayload,
+                  });
+                  setPluginSetting(saved);
+                  setPluginDraft({
+                    enabled: saved.enabled,
+                    overviewCardsEnabled: saved.config.overviewCardsEnabled,
+                    analyticsTabEnabled: saved.config.analyticsTabEnabled,
+                    analysisHours: String(saved.config.analysisHours ?? 24),
+                  });
+                  window.dispatchEvent(new Event("plugin-settings-changed"));
+                  setMsg("插件设置已保存");
+                } catch (e) {
+                  setErr(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              保存插件设置
+            </button>
+          </div>
+        </div>
+      )}
+    </Panel>
   );
 }
 

@@ -118,7 +118,7 @@ func (s *ResultStore) Query(ctx context.Context, detectorType string, q ResultQu
 
 // AggregateAvgFloat queries detector_results and computes the average of a JSONB
 // field within a time range, bucketed by the given interval.
-func (s *ResultStore) AggregateAvgFloat(ctx context.Context, detectorType string, projectID int, fieldName string, tr TimeRange, interval AggregateInterval) ([]MetricPoint, error) {
+func (s *ResultStore) AggregateAvgFloat(ctx context.Context, detectorType string, projectID int, monitorID int, fieldName string, tr TimeRange, interval AggregateInterval) ([]MetricPoint, error) {
 	if s.db == nil {
 		return nil, nil
 	}
@@ -128,22 +128,29 @@ func (s *ResultStore) AggregateAvgFloat(ctx context.Context, detectorType string
 		pgInterval = "1 hour"
 	}
 
+	monitorFilter := ""
+	args := []any{detectorType, projectID, tr.Start, tr.End}
+	if monitorID > 0 {
+		monitorFilter = " AND monitor_id = ?"
+		args = append(args, monitorID)
+	}
+
 	query := fmt.Sprintf(`
 		SELECT
 			time_bucket('%s', timestamp) AS bucket,
 			AVG((data->>'%s')::float8) AS avg_val
 		FROM detector_results
-		WHERE detector_type = ? AND project_id = ? AND timestamp >= ? AND timestamp <= ?
+		WHERE detector_type = ? AND project_id = ? AND timestamp >= ? AND timestamp <= ?%s
 		GROUP BY bucket
 		ORDER BY bucket ASC
-	`, pgInterval, fieldName)
+	`, pgInterval, fieldName, monitorFilter)
 
 	type row struct {
-		Bucket  time.Time
-		AvgVal  float64
+		Bucket time.Time
+		AvgVal float64
 	}
 	var rows []row
-	if err := s.db.WithContext(ctx).Raw(query, detectorType, projectID, tr.Start, tr.End).Scan(&rows).Error; err != nil {
+	if err := s.db.WithContext(ctx).Raw(query, args...).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 
@@ -160,7 +167,7 @@ func (s *ResultStore) AggregateAvgFloat(ctx context.Context, detectorType string
 
 // AggregateSuccessRate computes the success rate (percentage of records where
 // data->>'success' = 'true') bucketed by interval.
-func (s *ResultStore) AggregateSuccessRate(ctx context.Context, detectorType string, projectID int, tr TimeRange, interval AggregateInterval) ([]MetricPoint, error) {
+func (s *ResultStore) AggregateSuccessRate(ctx context.Context, detectorType string, projectID int, monitorID int, tr TimeRange, interval AggregateInterval) ([]MetricPoint, error) {
 	if s.db == nil {
 		return nil, nil
 	}
@@ -170,22 +177,29 @@ func (s *ResultStore) AggregateSuccessRate(ctx context.Context, detectorType str
 		pgInterval = "1 hour"
 	}
 
+	monitorFilter := ""
+	args := []any{detectorType, projectID, tr.Start, tr.End}
+	if monitorID > 0 {
+		monitorFilter = " AND monitor_id = ?"
+		args = append(args, monitorID)
+	}
+
 	query := fmt.Sprintf(`
 		SELECT
 			time_bucket('%s', timestamp) AS bucket,
 			COUNT(*) FILTER (WHERE (data->>'success')::boolean = true) * 100.0 / NULLIF(COUNT(*), 0) AS rate
 		FROM detector_results
-		WHERE detector_type = ? AND project_id = ? AND timestamp >= ? AND timestamp <= ?
+		WHERE detector_type = ? AND project_id = ? AND timestamp >= ? AND timestamp <= ?%s
 		GROUP BY bucket
 		ORDER BY bucket ASC
-	`, pgInterval)
+	`, pgInterval, monitorFilter)
 
 	type row struct {
 		Bucket time.Time
 		Rate   float64
 	}
 	var rows []row
-	if err := s.db.WithContext(ctx).Raw(query, detectorType, projectID, tr.Start, tr.End).Scan(&rows).Error; err != nil {
+	if err := s.db.WithContext(ctx).Raw(query, args...).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 

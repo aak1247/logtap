@@ -133,6 +133,7 @@ export function UptimeOverview(props: WidgetProps) {
                 start,
                 end,
                 interval: "1h",
+                monitorId: m.id,
               });
               if (!cancelled) newAgg.set(m.id, a.points || []);
             } catch {}

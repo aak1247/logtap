@@ -123,7 +123,7 @@ export function ProjectsPage() {
                         onClick={() => {
                           saveSettings({ ...settings, projectId: pid });
                           setActiveProjectId(pid);
-                          nav(`/settings#project`);
+                          nav(`/settings/project`);
                         }}
                       >
                         <SettingsIcon className="h-4 w-4" />

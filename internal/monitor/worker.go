@@ -208,10 +208,11 @@ func (w *Worker) executeOne(ctx context.Context, item model.MonitorDefinition) e
 	res.Details["signals"] = res.SignalCount
 	res.Details["intervalSec"] = intervalSec
 
-	// Persist typed results if plugin supports ResultStorePlugin.
-	if rs, ok := p.(detector.ResultStorePlugin); ok {
+	// Persist typed results through the shared store so built-in and dynamic
+	// detectors expose a consistent analysis surface.
+	if w.Store != nil {
 		typedResults := buildTypedResults(item, signals, startedAt)
-		if err := rs.StoreResults(execCtx, item.ProjectID, typedResults); err != nil {
+		if err := w.Store.Store(execCtx, typedResults); err != nil {
 			// Log but don't fail the run.
 			res.Details["store_error"] = err.Error()
 		}

@@ -41,12 +41,12 @@ func (Plugin) ConfigSchema() json.RawMessage {
 }
 
 type sslCheckConfig struct {
-	Host           string   `json:"host"`
-	Port           int      `json:"port"`
-	TimeoutMS      int      `json:"timeoutMs"`
-	MinValidDays   int      `json:"minValidDays"`
-	ExpectedSANs   []string `json:"expectedSANs"`
-	AllowSelfSigned bool    `json:"allowSelfSigned"`
+	Host            string   `json:"host"`
+	Port            int      `json:"port"`
+	TimeoutMS       int      `json:"timeoutMs"`
+	MinValidDays    int      `json:"minValidDays"`
+	ExpectedSANs    []string `json:"expectedSANs"`
+	AllowSelfSigned bool     `json:"allowSelfSigned"`
 }
 
 func (Plugin) ValidateConfig(cfg json.RawMessage) error {
@@ -90,6 +90,7 @@ func (Plugin) Execute(ctx context.Context, req detector.ExecuteRequest) ([]detec
 	now := nowOrUTC(req.Now)
 
 	dialer := &net.Dialer{Timeout: timeout}
+	start := time.Now()
 	conn, err := tls.DialWithDialer(dialer, "tcp",
 		net.JoinHostPort(c.Host, fmt.Sprintf("%d", c.Port)),
 		&tls.Config{
@@ -97,6 +98,7 @@ func (Plugin) Execute(ctx context.Context, req detector.ExecuteRequest) ([]detec
 			ServerName:         c.Host,
 		},
 	)
+	elapsed := time.Since(start)
 	if err != nil {
 		return []detector.Signal{{
 			ProjectID:  req.ProjectID,
@@ -107,7 +109,7 @@ func (Plugin) Execute(ctx context.Context, req detector.ExecuteRequest) ([]detec
 			Title:      fmt.Sprintf("SSL %s:%d", c.Host, c.Port),
 			Message:    fmt.Sprintf("ssl_check connection failed: %v", err),
 			Labels:     map[string]string{"host": c.Host, "port": fmt.Sprintf("%d", c.Port)},
-			Fields:     map[string]any{"error": err.Error(), "success": false, "source_type": "ssl_check"},
+			Fields:     map[string]any{"error": err.Error(), "success": false, "source_type": "ssl_check", "elapsed_ms": elapsed.Milliseconds()},
 			OccurredAt: now,
 		}}, nil
 	}
@@ -124,7 +126,7 @@ func (Plugin) Execute(ctx context.Context, req detector.ExecuteRequest) ([]detec
 			Title:      fmt.Sprintf("SSL %s:%d", c.Host, c.Port),
 			Message:    "no peer certificates found",
 			Labels:     map[string]string{"host": c.Host, "port": fmt.Sprintf("%d", c.Port)},
-			Fields:     map[string]any{"success": false, "source_type": "ssl_check"},
+			Fields:     map[string]any{"success": false, "source_type": "ssl_check", "elapsed_ms": elapsed.Milliseconds()},
 			OccurredAt: now,
 		}}, nil
 	}
@@ -138,6 +140,7 @@ func (Plugin) Execute(ctx context.Context, req detector.ExecuteRequest) ([]detec
 		"source_type":    "ssl_check",
 		"host":           c.Host,
 		"port":           c.Port,
+		"elapsed_ms":     elapsed.Milliseconds(),
 		"success":        true,
 		"subject_cn":     leaf.Subject.CommonName,
 		"not_before":     leaf.NotBefore.Format(time.RFC3339),
@@ -271,7 +274,7 @@ func (Plugin) Aggregate(ctx context.Context, projectID int, tr detector.TimeRang
 }
 
 func AggregateWithStore(ctx context.Context, store *detector.ResultStore, projectID int, tr detector.TimeRange, interval detector.AggregateInterval) (map[string][]detector.MetricPoint, error) {
-	daysLeft, err := store.AggregateAvgFloat(ctx, "ssl_check", projectID, "cert_days_left", tr, interval)
+	daysLeft, err := store.AggregateAvgFloat(ctx, "ssl_check", projectID, 0, "cert_days_left", tr, interval)
 	if err != nil {
 		return nil, err
 	}

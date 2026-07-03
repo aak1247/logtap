@@ -102,6 +102,7 @@ func (Plugin) Execute(ctx context.Context, req detector.ExecuteRequest) ([]detec
 		"host":        c.Host,
 		"port":        c.Port,
 		"elapsed_ms":  elapsed.Milliseconds(),
+		"success":     true,
 	}
 
 	severity := "info"
@@ -113,6 +114,7 @@ func (Plugin) Execute(ctx context.Context, req detector.ExecuteRequest) ([]detec
 		status = "firing"
 		message = fmt.Sprintf("tcp_check failed: %v", err)
 		fields["error"] = err.Error()
+		fields["success"] = false
 	}
 
 	occurredAt := nowOrUTC(req.Now)
@@ -153,11 +155,11 @@ func (Plugin) Aggregate(ctx context.Context, projectID int, tr detector.TimeRang
 }
 
 func AggregateWithStore(ctx context.Context, store *detector.ResultStore, projectID int, tr detector.TimeRange, interval detector.AggregateInterval) (map[string][]detector.MetricPoint, error) {
-	elapsed, err := store.AggregateAvgFloat(ctx, "tcp_check", projectID, "elapsed_ms", tr, interval)
+	elapsed, err := store.AggregateAvgFloat(ctx, "tcp_check", projectID, 0, "elapsed_ms", tr, interval)
 	if err != nil {
 		return nil, err
 	}
-	success, err := store.AggregateSuccessRate(ctx, "tcp_check", projectID, tr, interval)
+	success, err := store.AggregateSuccessRate(ctx, "tcp_check", projectID, 0, tr, interval)
 	if err != nil {
 		return nil, err
 	}

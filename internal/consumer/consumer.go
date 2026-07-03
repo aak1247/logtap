@@ -210,7 +210,7 @@ func handleEventMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisR
 						dims["asn_org"] = g.ASNOrg
 					}
 				}
-				recorder.ObserveEventDist(metricsCtx, row.ProjectID, row.Timestamp, dims)
+				recorder.ObserveEventDist(metricsCtx, row.ProjectID, row.Timestamp, row.DistinctID, dims)
 			}
 			if stats != nil {
 				stats.ObserveConsumerMessage(time.Since(msgStart), nil)
@@ -335,7 +335,7 @@ func handleLogMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisRec
 						"city":    g.City,
 						"asn_org": g.ASNOrg,
 					}
-					recorder.ObserveEventDist(metricsCtx, row.ProjectID, row.Timestamp, dims)
+					recorder.ObserveEventDist(metricsCtx, row.ProjectID, row.Timestamp, row.DistinctID, dims)
 				}
 			}
 		}

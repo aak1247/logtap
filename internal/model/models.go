@@ -203,3 +203,18 @@ type AnalysisView struct {
 }
 
 func (AnalysisView) TableName() string { return "analysis_views" }
+
+// PluginPackageSetting stores project-level configuration for a detector/plugin
+// package. The JSON config is package-owned; common built-in keys are normalized
+// in query handlers before being persisted.
+type PluginPackageSetting struct {
+	ID        int64          `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
+	ProjectID int            `gorm:"not null;uniqueIndex:idx_plugin_package_settings_project_package,priority:1;index;column:project_id" json:"project_id"`
+	PackageID string         `gorm:"type:varchar(128);not null;uniqueIndex:idx_plugin_package_settings_project_package,priority:2;column:package_id" json:"package_id"`
+	Enabled   bool           `gorm:"not null;default:true;column:enabled" json:"enabled"`
+	Config    datatypes.JSON `gorm:"type:jsonb;not null;default:'{}';column:config" json:"config"`
+	CreatedAt time.Time      `gorm:"not null;autoCreateTime;column:created_at" json:"created_at"`
+	UpdatedAt time.Time      `gorm:"not null;autoUpdateTime;column:updated_at" json:"updated_at"`
+}
+
+func (PluginPackageSetting) TableName() string { return "plugin_package_settings" }

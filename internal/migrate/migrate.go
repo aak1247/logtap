@@ -40,6 +40,7 @@ func AutoMigrate(ctx context.Context, db *gorm.DB, opts Options) error {
 		&model.EventDefinition{},
 		&model.PropertyDefinition{},
 		&model.AnalysisView{},
+		&model.PluginPackageSetting{},
 
 		// Alerting (optional feature; safe to have tables even if unused).
 		&model.AlertContact{},

@@ -97,11 +97,12 @@ func (r *RedisRecorder) ObserveEvent(ctx context.Context, projectID int, level s
 	r.expireKeys(ctx, expire)
 }
 
-func (r *RedisRecorder) ObserveEventDist(ctx context.Context, projectID int, ts time.Time, dims map[string]string) {
+func (r *RedisRecorder) ObserveEventDist(ctx context.Context, projectID int, ts time.Time, distinctID string, dims map[string]string) {
 	if r == nil || r.rdb == nil {
 		return
 	}
 	date := ts.UTC().Format("2006-01-02")
+	distinctID = strings.TrimSpace(distinctID)
 
 	pipe := r.rdb.Pipeline()
 	expire := map[string]time.Duration{}
@@ -113,6 +114,11 @@ func (r *RedisRecorder) ObserveEventDist(ctx context.Context, projectID int, ts 
 		hashKey := fmt.Sprintf("dist:%s:%d:%s", dim, projectID, date)
 		pipe.HIncrBy(ctx, hashKey, key, 1)
 		expire[hashKey] = r.distTTL
+		if distinctID != "" {
+			userKey := fmt.Sprintf("dist_users:%s:%d:%s:%s", dim, projectID, date, key)
+			pipe.PFAdd(ctx, userKey, distinctID)
+			expire[userKey] = r.distTTL
+		}
 	}
 	_, _ = pipe.Exec(ctx)
 	r.expireKeys(ctx, expire)
@@ -297,11 +303,6 @@ func (r *RedisRecorder) WarmActiveUsersFromDB(ctx context.Context, db *gorm.DB, 
 	}
 	readyDayKey := activeWarmupDayReadyKey(now)
 	readyMonthKey := activeWarmupMonthReadyKey(now)
-	readyDays, _ := r.rdb.Get(ctx, readyDayKey).Int()
-	readyMonths, _ := r.rdb.Get(ctx, readyMonthKey).Int()
-	if readyDays >= days && readyMonths >= months {
-		return nil
-	}
 
 	sources := activeWarmupSources(db)
 	if len(sources) == 0 {
@@ -551,6 +552,11 @@ type DistItem struct {
 	Count int64  `json:"count"`
 }
 
+type DistBucket struct {
+	Bucket string     `json:"bucket"`
+	Items  []DistItem `json:"items"`
+}
+
 type RetentionPoint struct {
 	Day    int     `json:"day"`
 	Active int64   `json:"active"`
@@ -571,6 +577,10 @@ return n
 `
 
 func (r *RedisRecorder) Distribution(ctx context.Context, projectID int, dim string, start, end time.Time, limit int) ([]DistItem, error) {
+	return r.DistributionMetric(ctx, projectID, dim, start, end, limit, "events")
+}
+
+func (r *RedisRecorder) DistributionMetric(ctx context.Context, projectID int, dim string, start, end time.Time, limit int, metric string) ([]DistItem, error) {
 	if r == nil || r.rdb == nil {
 		return nil, nil
 	}
@@ -590,31 +600,93 @@ func (r *RedisRecorder) Distribution(ctx context.Context, projectID int, dim str
 	if end.Before(start) {
 		start, end = end, start
 	}
+	metric = normalizeDistMetric(metric)
 
 	acc := map[string]int64{}
-	cur := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
-	last := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
-
-	for !cur.After(last) {
-		b := cur.Format("2006-01-02")
-		hashKey := fmt.Sprintf("dist:%s:%d:%s", dim, projectID, b)
-		m, err := r.rdb.HGetAll(ctx, hashKey).Result()
-		if err != nil && err != redis.Nil {
+	if metric == "users" {
+		m, err := r.distributionUsersForWindow(ctx, projectID, dim, start, end)
+		if err != nil {
 			return nil, err
 		}
-		for k, v := range m {
-			n, err := strconv.ParseInt(v, 10, 64)
+		acc = m
+	} else {
+		cur := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+		last := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+		for !cur.After(last) {
+			day := cur.Format("2006-01-02")
+			m, err := r.distributionEventsForDay(ctx, projectID, dim, day)
 			if err != nil {
-				continue
+				return nil, err
 			}
-			acc[k] += n
+			for k, v := range m {
+				acc[k] += v
+			}
+			cur = cur.AddDate(0, 0, 1)
 		}
-		cur = cur.AddDate(0, 0, 1)
 	}
 
+	return topDistItems(acc, limit), nil
+}
+
+func (r *RedisRecorder) DistributionSeries(ctx context.Context, projectID int, dim string, start, end time.Time, bucket string, limit int, metric string) ([]DistBucket, error) {
+	if r == nil || r.rdb == nil {
+		return nil, nil
+	}
+	dim = strings.TrimSpace(dim)
+	if dim == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	start = start.UTC()
+	end = end.UTC()
+	if end.Before(start) {
+		start, end = end, start
+	}
+	bucket = normalizeDistBucket(bucket)
+	metric = normalizeDistMetric(metric)
+
+	var out []DistBucket
+	for _, window := range distWindows(start, end, bucket) {
+		acc := map[string]int64{}
+		if metric == "users" {
+			m, err := r.distributionUsersForWindow(ctx, projectID, dim, window.start, window.end)
+			if err != nil {
+				return nil, err
+			}
+			acc = m
+		} else {
+			cur := window.start
+			for !cur.After(window.end) {
+				day := cur.Format("2006-01-02")
+				m, err := r.distributionEventsForDay(ctx, projectID, dim, day)
+				if err != nil {
+					return nil, err
+				}
+				for k, v := range m {
+					acc[k] += v
+				}
+				cur = cur.AddDate(0, 0, 1)
+			}
+		}
+		out = append(out, DistBucket{
+			Bucket: window.label,
+			Items:  topDistItems(acc, limit),
+		})
+	}
+	return out, nil
+}
+
+func topDistItems(acc map[string]int64, limit int) []DistItem {
 	items := make([]DistItem, 0, len(acc))
 	for k, v := range acc {
-		items = append(items, DistItem{Key: k, Count: v})
+		if v > 0 {
+			items = append(items, DistItem{Key: k, Count: v})
+		}
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Count == items[j].Count {
@@ -625,7 +697,192 @@ func (r *RedisRecorder) Distribution(ctx context.Context, projectID int, dim str
 	if len(items) > limit {
 		items = items[:limit]
 	}
-	return items, nil
+	return items
+}
+
+func (r *RedisRecorder) distributionEventsForDay(ctx context.Context, projectID int, dim string, day string) (map[string]int64, error) {
+	hashKey := fmt.Sprintf("dist:%s:%d:%s", dim, projectID, day)
+	m, err := r.rdb.HGetAll(ctx, hashKey).Result()
+	if err != nil && err != redis.Nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(m))
+	for k, v := range m {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			continue
+		}
+		out[k] = n
+	}
+	return out, nil
+}
+
+func (r *RedisRecorder) distributionUsersForWindow(ctx context.Context, projectID int, dim string, start, end time.Time) (map[string]int64, error) {
+	keysByValue := map[string][]string{}
+	cur := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	last := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+	for !cur.After(last) {
+		day := cur.Format("2006-01-02")
+		keys, err := r.distributionUserKeysForDay(ctx, projectID, dim, day)
+		if err != nil {
+			return nil, err
+		}
+		for value, dayKeys := range keys {
+			keysByValue[value] = append(keysByValue[value], dayKeys...)
+		}
+		cur = cur.AddDate(0, 0, 1)
+	}
+
+	out := make(map[string]int64, len(keysByValue))
+	for value, keys := range keysByValue {
+		if len(keys) == 0 {
+			continue
+		}
+		n, err := r.pfCountUnion(ctx, keys)
+		if err != nil {
+			return nil, err
+		}
+		out[value] = n
+	}
+	return out, nil
+}
+
+func (r *RedisRecorder) distributionUserKeysForDay(ctx context.Context, projectID int, dim string, day string) (map[string][]string, error) {
+	pattern := fmt.Sprintf("dist_users:%s:%d:%s:*", dim, projectID, day)
+	keys, err := r.rdb.Keys(ctx, pattern).Result()
+	if err != nil && err != redis.Nil {
+		return nil, err
+	}
+	out := make(map[string][]string, len(keys))
+	prefix := fmt.Sprintf("dist_users:%s:%d:%s:", dim, projectID, day)
+	for _, key := range keys {
+		value := strings.TrimPrefix(key, prefix)
+		if value == "" {
+			continue
+		}
+		out[value] = append(out[value], key)
+	}
+	return out, nil
+}
+
+func (r *RedisRecorder) distributionUsersForDay(ctx context.Context, projectID int, dim string, day string) (map[string]int64, error) {
+	keysByValue, err := r.distributionUserKeysForDay(ctx, projectID, dim, day)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(keysByValue))
+	for value, keys := range keysByValue {
+		if len(keys) == 0 {
+			continue
+		}
+		n, err := r.pfCountUnion(ctx, keys)
+		if err != nil {
+			return nil, err
+		}
+		out[value] = n
+	}
+	return out, nil
+}
+
+func (r *RedisRecorder) pfCountUnion(ctx context.Context, keys []string) (int64, error) {
+	if len(keys) == 0 {
+		return 0, nil
+	}
+	if len(keys) == 1 {
+		n, err := r.rdb.PFCount(ctx, keys[0]).Result()
+		if err == redis.Nil {
+			return 0, nil
+		}
+		return n, err
+	}
+	tmpKey := fmt.Sprintf("dist_users:tmp:%d", time.Now().UnixNano())
+	if err := r.rdb.PFMerge(ctx, tmpKey, keys...).Err(); err != nil {
+		if err == redis.Nil {
+			return 0, nil
+		}
+		return 0, err
+	}
+	n, err := r.rdb.PFCount(ctx, tmpKey).Result()
+	_ = r.rdb.Del(ctx, tmpKey).Err()
+	if err == redis.Nil {
+		return 0, nil
+	}
+	return n, err
+}
+
+type distWindow struct {
+	label string
+	start time.Time
+	end   time.Time
+}
+
+func distWindows(start, end time.Time, bucket string) []distWindow {
+	startDay := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	endDay := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+	var out []distWindow
+	switch bucket {
+	case "year":
+		cur := time.Date(startDay.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+		for !cur.After(endDay) {
+			winEnd := cur.AddDate(1, 0, -1)
+			out = append(out, clippedDistWindow(cur.Format("2006"), cur, winEnd, startDay, endDay))
+			cur = cur.AddDate(1, 0, 0)
+		}
+	case "month":
+		cur := time.Date(startDay.Year(), startDay.Month(), 1, 0, 0, 0, 0, time.UTC)
+		for !cur.After(endDay) {
+			winEnd := cur.AddDate(0, 1, -1)
+			out = append(out, clippedDistWindow(cur.Format("2006-01"), cur, winEnd, startDay, endDay))
+			cur = cur.AddDate(0, 1, 0)
+		}
+	case "week":
+		cur := startOfISOWeek(startDay)
+		for !cur.After(endDay) {
+			year, week := cur.ISOWeek()
+			winEnd := cur.AddDate(0, 0, 6)
+			out = append(out, clippedDistWindow(fmt.Sprintf("%04d-W%02d", year, week), cur, winEnd, startDay, endDay))
+			cur = cur.AddDate(0, 0, 7)
+		}
+	default:
+		for cur := startDay; !cur.After(endDay); cur = cur.AddDate(0, 0, 1) {
+			out = append(out, distWindow{label: cur.Format("2006-01-02"), start: cur, end: cur})
+		}
+	}
+	return out
+}
+
+func clippedDistWindow(label string, start, end, min, max time.Time) distWindow {
+	if start.Before(min) {
+		start = min
+	}
+	if end.After(max) {
+		end = max
+	}
+	return distWindow{label: label, start: start, end: end}
+}
+
+func startOfISOWeek(t time.Time) time.Time {
+	weekday := int(t.Weekday())
+	if weekday == 0 {
+		weekday = 7
+	}
+	return t.AddDate(0, 0, 1-weekday)
+}
+
+func normalizeDistBucket(bucket string) string {
+	switch strings.ToLower(strings.TrimSpace(bucket)) {
+	case "week", "month", "year":
+		return strings.ToLower(strings.TrimSpace(bucket))
+	default:
+		return "day"
+	}
+}
+
+func normalizeDistMetric(metric string) string {
+	if strings.EqualFold(strings.TrimSpace(metric), "users") {
+		return "users"
+	}
+	return "events"
 }
 
 func (r *RedisRecorder) Retention(ctx context.Context, projectID int, start, end time.Time, dayOffsets []int) ([]RetentionRow, error) {

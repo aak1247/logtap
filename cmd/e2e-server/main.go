@@ -111,6 +111,7 @@ func openDB(dsn string) (*gorm.DB, error) {
 		&model.Log{},
 		&model.TrackEvent{},
 		&model.TrackEventDaily{},
+		&model.PluginPackageSetting{},
 		&model.AlertContact{},
 		&model.AlertContactGroup{},
 		&model.AlertContactGroupMember{},

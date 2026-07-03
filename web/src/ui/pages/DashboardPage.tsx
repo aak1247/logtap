@@ -4,6 +4,7 @@ import {
   getMetricsTotal,
   getRecentEvents,
   getStorageEstimate,
+  listPluginViews,
   type MetricsToday,
   type MetricsTotal,
   type RecentEvent,
@@ -13,8 +14,10 @@ import { loadSettings } from "../../lib/storage";
 import { Panel } from "../components/Panel";
 import { StatCard } from "../components/StatCard";
 import { Link, useNavigate } from "react-router-dom";
-// import side-effect to register built-in widgets
-import "../widgets/builtins";
+import { extensionFromApi } from "../pluginExtensions/api";
+import type { PluginExtensionDescriptor } from "../pluginExtensions/registry";
+import { pluginExtensionRegistry } from "../pluginExtensions/registry";
+import { PluginAnalysisView } from "../pluginExtensions/PluginAnalysisView";
 import { widgetRegistry } from "../widgets/registry";
 
 export function DashboardPage() {
@@ -24,6 +27,9 @@ export function DashboardPage() {
   const [total, setTotal] = useState<MetricsTotal | null>(null);
   const [storage, setStorage] = useState<StorageEstimate | null>(null);
   const [events, setEvents] = useState<RecentEvent[]>([]);
+  const [remoteCards, setRemoteCards] = useState<PluginExtensionDescriptor[]>([]);
+  const [remoteCardsLoaded, setRemoteCardsLoaded] = useState(false);
+  const [pluginViewsVersion, setPluginViewsVersion] = useState(0);
 
   const [err, setErr] = useState<string>("");
 
@@ -63,16 +69,50 @@ export function DashboardPage() {
   }, [settings.apiBase, settings.projectId]);
 
   const widgets = useMemo(() => widgetRegistry.getAll(), []);
+  const overviewCards = useMemo(
+    () =>
+      remoteCardsLoaded
+        ? remoteCards
+        : mergeExtensions(pluginExtensionRegistry.getOverviewCards(), remoteCards),
+    [remoteCards, remoteCardsLoaded],
+  );
+
+  useEffect(() => {
+    const onChanged = () => setPluginViewsVersion((v) => v + 1);
+    window.addEventListener("plugin-settings-changed", onChanged);
+    return () => window.removeEventListener("plugin-settings-changed", onChanged);
+  }, []);
+
+  useEffect(() => {
+    if (!settings.token || !settings.projectId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listPluginViews(settings);
+        if (cancelled) return;
+        setRemoteCards(
+          res.items
+            .map(extensionFromApi)
+            .filter((item): item is PluginExtensionDescriptor => Boolean(item))
+            .filter((item) => item.surface === "overview_card"),
+        );
+        setRemoteCardsLoaded(true);
+      } catch {
+        if (!cancelled) {
+          setRemoteCards([]);
+          setRemoteCardsLoaded(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.apiBase, settings.token, settings.projectId, pluginViewsVersion]);
 
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between">
-        <div>
-          <div className="text-lg font-semibold">概览</div>
-          <div className="mt-1 text-sm text-zinc-400">
-            API：{settings.apiBase} / 项目：{settings.projectId}
-          </div>
-        </div>
+        <div className="text-lg font-semibold">概览</div>
         <div className="text-xs text-zinc-500">刷新页面即可更新</div>
       </div>
 
@@ -106,6 +146,15 @@ export function DashboardPage() {
             </Panel>
           );
         })}
+        {overviewCards.map((card) => (
+          <Panel key={card.id} title={card.title}>
+            <PluginAnalysisView
+              extension={card}
+              settings={settings}
+              preferExtensionView
+            />
+          </Panel>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -117,7 +166,7 @@ export function DashboardPage() {
       <Panel
         title="存储"
         right={
-          <Link className="text-sm text-indigo-400 hover:text-indigo-300" to="/settings#cleanup">
+          <Link className="text-sm text-indigo-400 hover:text-indigo-300" to="/settings/cleanup">
             清理设置 →
           </Link>
         }
@@ -189,6 +238,16 @@ export function DashboardPage() {
       </Panel>
     </div>
   );
+}
+
+function mergeExtensions(
+  local: PluginExtensionDescriptor[],
+  remote: PluginExtensionDescriptor[],
+): PluginExtensionDescriptor[] {
+  const map = new Map<string, PluginExtensionDescriptor>();
+  for (const item of local) map.set(item.id, item);
+  for (const item of remote) map.set(item.id, item);
+  return Array.from(map.values()).sort((a, b) => a.title.localeCompare(b.title));
 }
 
 function formatBytes(bytes: number): string {

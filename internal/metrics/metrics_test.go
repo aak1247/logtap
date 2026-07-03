@@ -48,7 +48,8 @@ func TestRedisRecorder_Today_Active_Distribution_Retention(t *testing.T) {
 	day2 := time.Date(2025, 1, 2, 10, 0, 0, 0, time.UTC)
 
 	rec.ObserveEvent(ctx, 1, "error", "u1", "d1", "iOS", day2)
-	rec.ObserveEventDist(ctx, 1, day2, map[string]string{"os": "iOS", "browser": "Chrome"})
+	rec.ObserveEventDist(ctx, 1, day2, "u1", map[string]string{"os": "iOS", "browser": "Chrome"})
+	rec.ObserveEventDist(ctx, 1, day2, "u1", map[string]string{"os": "iOS", "browser": "Chrome"})
 	rec.ObserveLog(ctx, 1, "info", "u2", "d2", day2)
 
 	logs, events, errorsCount, users, ok, err := rec.Today(ctx, 1, now)
@@ -79,8 +80,23 @@ func TestRedisRecorder_Today_Active_Distribution_Retention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Distribution: %v", err)
 	}
-	if len(items) != 1 || items[0].Key != "iOS" || items[0].Count != 1 {
+	if len(items) != 1 || items[0].Key != "iOS" || items[0].Count != 2 {
 		t.Fatalf("unexpected dist items: %+v", items)
+	}
+	rec.ObserveEventDist(ctx, 1, day1, "u1", map[string]string{"os": "iOS"})
+	userItems, err := rec.DistributionMetric(ctx, 1, "os", day1, day2, 10, "users")
+	if err != nil {
+		t.Fatalf("DistributionMetric(users): %v", err)
+	}
+	if len(userItems) != 1 || userItems[0].Key != "iOS" || userItems[0].Count != 1 {
+		t.Fatalf("unexpected user dist items: %+v", userItems)
+	}
+	buckets, err := rec.DistributionSeries(ctx, 1, "os", day1, day2, "day", 10, "users")
+	if err != nil {
+		t.Fatalf("DistributionSeries(users): %v", err)
+	}
+	if len(buckets) != 2 || len(buckets[1].Items) != 1 || buckets[1].Items[0].Count != 1 {
+		t.Fatalf("unexpected user dist series: %+v", buckets)
 	}
 
 	// Retention for cohort day1 (u1 active on day1 and day2).
@@ -128,6 +144,12 @@ func TestRedisRecorder_WarmActiveUsersFromDB(t *testing.T) {
 	t.Cleanup(func() { _ = rdb.Close() })
 	rec := NewRedisRecorder(rdb)
 
+	if err := rdb.Set(ctx, activeWarmupDayReadyKey(now), 30, time.Hour).Err(); err != nil {
+		t.Fatalf("set ready day: %v", err)
+	}
+	if err := rdb.Set(ctx, activeWarmupMonthReadyKey(now), 6, time.Hour).Err(); err != nil {
+		t.Fatalf("set ready month: %v", err)
+	}
 	if err := rec.WarmActiveUsersFromDB(ctx, gdb, ActiveWarmupOptions{Days: 3, Months: 2, BatchSize: 2, Now: now}); err != nil {
 		t.Fatalf("WarmActiveUsersFromDB: %v", err)
 	}

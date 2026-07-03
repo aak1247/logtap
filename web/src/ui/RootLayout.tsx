@@ -1,6 +1,10 @@
-import { useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
+import { listPluginViews } from "../lib/api";
 import { loadSettings, subscribeSettingsChange } from "../lib/storage";
+import { extensionFromApi } from "./pluginExtensions/api";
+import type { PluginExtensionDescriptor } from "./pluginExtensions/registry";
+import { pluginExtensionRegistry } from "./pluginExtensions/registry";
 
 const navItem =
   "px-3 py-2 rounded-lg text-sm text-zinc-300 transition-colors hover:text-zinc-100 hover:bg-zinc-900";
@@ -12,6 +16,44 @@ export function RootLayout(props?: {
 }) {
   const s = useSyncExternalStore(subscribeSettingsChange, loadSettings, loadSettings);
   const extraNavItems: ReactNode = props?.extraNavItems ?? null;
+  const [remotePages, setRemotePages] = useState<PluginExtensionDescriptor[]>([]);
+  const [remotePagesLoaded, setRemotePagesLoaded] = useState(false);
+  const [pluginViewsVersion, setPluginViewsVersion] = useState(0);
+  const pluginPages = remotePagesLoaded
+    ? remotePages
+    : mergeExtensions(pluginExtensionRegistry.getPages(), remotePages);
+
+  useEffect(() => {
+    const onChanged = () => setPluginViewsVersion((v) => v + 1);
+    window.addEventListener("plugin-settings-changed", onChanged);
+    return () => window.removeEventListener("plugin-settings-changed", onChanged);
+  }, []);
+
+  useEffect(() => {
+    if (!s.token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listPluginViews(s);
+        if (cancelled) return;
+        setRemotePages(
+          res.items
+            .map(extensionFromApi)
+            .filter((item): item is PluginExtensionDescriptor => Boolean(item))
+            .filter((item) => item.surface === "page"),
+        );
+        setRemotePagesLoaded(true);
+      } catch {
+        if (!cancelled) {
+          setRemotePages([]);
+          setRemotePagesLoaded(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [s.apiBase, s.token, s.projectId, pluginViewsVersion]);
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 border-b border-zinc-900 bg-zinc-950/90 backdrop-blur">
@@ -85,6 +127,19 @@ export function RootLayout(props?: {
               >
                 设置
               </NavLink>
+              {pluginPages.map((page) =>
+                page.path ? (
+                  <NavLink
+                    key={page.id}
+                    to={page.path}
+                    className={({ isActive }) =>
+                      `${navItem} ${isActive ? navItemActive : ""}`
+                    }
+                  >
+                    {page.title}
+                  </NavLink>
+                ) : null,
+              )}
               {extraNavItems}
             </nav>
           </div>
@@ -96,4 +151,14 @@ export function RootLayout(props?: {
       </main>
     </div>
   );
+}
+
+function mergeExtensions(
+  local: PluginExtensionDescriptor[],
+  remote: PluginExtensionDescriptor[],
+): PluginExtensionDescriptor[] {
+  const map = new Map<string, PluginExtensionDescriptor>();
+  for (const item of local) map.set(item.id, item);
+  for (const item of remote) map.set(item.id, item);
+  return Array.from(map.values()).sort((a, b) => a.title.localeCompare(b.title));
 }

@@ -108,7 +108,41 @@ const (
 )
 
 type Descriptor struct {
-	Type string
-	Mode RegistrationMode
-	Path string
+	Type      string
+	Mode      RegistrationMode
+	Path      string
+	PackageID string `json:"packageId,omitempty"`
+}
+
+type PackageManifest struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Version     string   `json:"version"`
+	Builtin     bool     `json:"builtin"`
+	Description string   `json:"description,omitempty"`
+	Detectors   []string `json:"detectors"`
+}
+
+type ViewSurface string
+
+const (
+	ViewSurfaceOverviewCard ViewSurface = "overview_card"
+	ViewSurfaceAnalyticsTab ViewSurface = "analytics_tab"
+	ViewSurfacePage         ViewSurface = "page"
+)
+
+type ViewDescriptor struct {
+	ID           string          `json:"id"`
+	PackageID    string          `json:"packageId"`
+	DetectorType string          `json:"detectorType,omitempty"`
+	Surface      ViewSurface     `json:"surface"`
+	Title        string          `json:"title"`
+	Path         string          `json:"path,omitempty"`
+	View         json.RawMessage `json:"view,omitempty"`
+}
+
+type DetectorPackage interface {
+	Manifest() PackageManifest
+	Detectors() []DetectorPlugin
+	Views() []ViewDescriptor
 }

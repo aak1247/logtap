@@ -21,12 +21,10 @@ import (
 	"github.com/aak1247/logtap/internal/consumer"
 	"github.com/aak1247/logtap/internal/db"
 	"github.com/aak1247/logtap/internal/detector"
-	"github.com/aak1247/logtap/internal/detector/plugins/dnscheck"
+	"github.com/aak1247/logtap/internal/detector/packages/connectivity"
 	"github.com/aak1247/logtap/internal/detector/plugins/httpcheck"
 	"github.com/aak1247/logtap/internal/detector/plugins/logbasic"
 	"github.com/aak1247/logtap/internal/detector/plugins/metricthreshold"
-	"github.com/aak1247/logtap/internal/detector/plugins/sslcheck"
-	"github.com/aak1247/logtap/internal/detector/plugins/tcpcheck"
 	"github.com/aak1247/logtap/internal/enrich"
 	"github.com/aak1247/logtap/internal/httpserver"
 	"github.com/aak1247/logtap/internal/metrics"
@@ -148,17 +146,11 @@ func main() {
 	if err := detectorRegistry.RegisterStatic(httpcheck.New()); err != nil {
 		log.Printf("detector register static http_check: %v", err)
 	}
-	if err := detectorRegistry.RegisterStatic(tcpcheck.New()); err != nil {
-		log.Printf("detector register static tcp_check: %v", err)
-	}
 	if err := detectorRegistry.RegisterStatic(metricthreshold.New()); err != nil {
 		log.Printf("detector register static metric_threshold: %v", err)
 	}
-	if err := detectorRegistry.RegisterStatic(dnscheck.New()); err != nil {
-		log.Printf("detector register static dns_check: %v", err)
-	}
-	if err := detectorRegistry.RegisterStatic(sslcheck.New()); err != nil {
-		log.Printf("detector register static ssl_check: %v", err)
+	if err := detectorRegistry.RegisterPackage(connectivity.New()); err != nil {
+		log.Printf("detector register package connectivity: %v", err)
 	}
 	dynamicLoaded := 0
 	dynamicFailed := 0

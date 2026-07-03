@@ -39,6 +39,7 @@ func OpenTestDB(t testing.TB) *gorm.DB {
 		&model.UserFirstSeen{},
 		&model.ProjectCounter{},
 		&model.LogDailyStat{},
+		&model.PluginPackageSetting{},
 
 		&model.AlertContact{},
 		&model.AlertContactGroup{},

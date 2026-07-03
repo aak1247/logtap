@@ -29,6 +29,63 @@ func ListDetectorsHandler(svc *detector.Service) gin.HandlerFunc {
 	}
 }
 
+func ListDetectorPackagesHandler(svc *detector.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if svc == nil {
+			respondErr(c, http.StatusServiceUnavailable, "detector service not configured")
+			return
+		}
+		items, err := svc.ListPackages()
+		if err != nil {
+			if errors.Is(err, detector.ErrServiceNotConfigured) {
+				respondErr(c, http.StatusServiceUnavailable, err.Error())
+				return
+			}
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		respondOK(c, gin.H{"items": items})
+	}
+}
+
+func ListDetectorViewsHandler(svc *detector.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if svc == nil {
+			respondErr(c, http.StatusServiceUnavailable, "detector service not configured")
+			return
+		}
+		items, err := svc.ListViews(c.Param("detectorType"))
+		if err != nil {
+			if errors.Is(err, detector.ErrServiceNotConfigured) {
+				respondErr(c, http.StatusServiceUnavailable, err.Error())
+				return
+			}
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		respondOK(c, gin.H{"items": items})
+	}
+}
+
+func ListPluginViewsHandler(svc *detector.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if svc == nil {
+			respondErr(c, http.StatusServiceUnavailable, "detector service not configured")
+			return
+		}
+		items, err := svc.ListViews("")
+		if err != nil {
+			if errors.Is(err, detector.ErrServiceNotConfigured) {
+				respondErr(c, http.StatusServiceUnavailable, err.Error())
+				return
+			}
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		respondOK(c, gin.H{"items": items})
+	}
+}
+
 func GetDetectorSchemaHandler(svc *detector.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if svc == nil {
@@ -107,20 +164,33 @@ func DetectorAggregateHandler(svc *detector.Service, store *detector.ResultStore
 		if interval == "" {
 			interval = detector.IntervalHour
 		}
+		monitorID := 0
+		if raw := c.Query("monitor_id"); raw != "" {
+			v, err := strconv.Atoi(raw)
+			if err != nil || v <= 0 {
+				respondErr(c, http.StatusBadRequest, "invalid monitor_id")
+				return
+			}
+			monitorID = v
+		}
 
 		tr := detector.TimeRange{Start: start, End: end}
 
 		// First try the plugin's own Aggregate method
-		points, err := svc.Aggregate(c.Request.Context(), c.Param("detectorType"), projectID, tr, interval)
-		if err == nil {
-			respondOK(c, gin.H{"points": points})
-			return
+		var aggregateErr error
+		if monitorID == 0 {
+			var points []detector.MetricPoint
+			points, aggregateErr = svc.Aggregate(c.Request.Context(), c.Param("detectorType"), projectID, tr, interval)
+			if aggregateErr == nil {
+				respondOK(c, gin.H{"points": points})
+				return
+			}
 		}
 
 		// Fallback to generic store-based aggregation
 		if store != nil {
-			elapsed, e1 := store.AggregateAvgFloat(c.Request.Context(), c.Param("detectorType"), projectID, "elapsed_ms", tr, interval)
-			success, e2 := store.AggregateSuccessRate(c.Request.Context(), c.Param("detectorType"), projectID, tr, interval)
+			elapsed, e1 := store.AggregateAvgFloat(c.Request.Context(), c.Param("detectorType"), projectID, monitorID, "elapsed_ms", tr, interval)
+			success, e2 := store.AggregateSuccessRate(c.Request.Context(), c.Param("detectorType"), projectID, monitorID, tr, interval)
 			if e1 == nil && e2 == nil {
 				respondOK(c, gin.H{
 					"elapsed_ms":   elapsed,
@@ -130,6 +200,10 @@ func DetectorAggregateHandler(svc *detector.Service, store *detector.ResultStore
 			}
 		}
 
-		respondErr(c, http.StatusServiceUnavailable, err.Error())
+		errMsg := "detector aggregate not available"
+		if aggregateErr != nil {
+			errMsg = aggregateErr.Error()
+		}
+		respondErr(c, http.StatusServiceUnavailable, errMsg)
 	}
 }

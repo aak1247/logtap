@@ -82,6 +82,45 @@ export type SystemStatusResponse = {
   message?: string;
 };
 
+export type PluginPackage = {
+  id: string;
+  name: string;
+  version: string;
+  builtin: boolean;
+  description?: string;
+  detectors: string[];
+};
+
+export type PluginViewDescriptor = {
+  id: string;
+  packageId: string;
+  detectorType?: string;
+  surface: "overview_card" | "analytics_tab" | "page";
+  title: string;
+  path?: string;
+  view?: unknown;
+};
+
+export type PluginAnalysisResponse = {
+  view?: unknown;
+  [key: string]: unknown;
+};
+
+export type PluginPackageConfig = {
+  overviewCardsEnabled: boolean;
+  analyticsTabEnabled: boolean;
+  analysisHours: number;
+};
+
+export type PluginPackageSetting = {
+  projectId: number;
+  packageId: string;
+  enabled: boolean;
+  config: PluginPackageConfig;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type Project = { id: string; owner_user_id: number; name: string };
 export type ProjectKey = {
   id: number;
@@ -328,11 +367,93 @@ export async function getDetectorHealth(
   );
 }
 
+export async function listPluginPackages(
+  s: ApiSettings,
+): Promise<{ items: PluginPackage[] }> {
+  return fetchJSON(`${s.apiBase}/api/plugins/packages`, s.token);
+}
+
+export async function listDetectorViews(
+  s: ApiSettings,
+  detectorType: string,
+): Promise<{ items: PluginViewDescriptor[] }> {
+  return fetchJSON(
+    `${s.apiBase}/api/plugins/detectors/${encodeURIComponent(detectorType)}/views`,
+    s.token,
+  );
+}
+
+export async function listPluginViews(
+  s: ApiSettings,
+): Promise<{ items: PluginViewDescriptor[] }> {
+  if (s.projectId) {
+    return fetchJSON(`${s.apiBase}/api/${s.projectId}/plugins/views`, s.token);
+  }
+  return fetchJSON(`${s.apiBase}/api/plugins/views`, s.token);
+}
+
+export async function getPluginPackageSetting(
+  s: ApiSettings,
+  packageId: string,
+): Promise<PluginPackageSetting> {
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/plugins/packages/${encodeURIComponent(packageId)}/settings`,
+    s.token,
+  );
+}
+
+export async function upsertPluginPackageSetting(
+  s: ApiSettings,
+  packageId: string,
+  req: {
+    enabled?: boolean;
+    config?: Partial<PluginPackageConfig>;
+  },
+): Promise<PluginPackageSetting> {
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/plugins/packages/${encodeURIComponent(packageId)}/settings`,
+    s.token,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    },
+  );
+}
+
+export async function getDetectorAnalysis(
+  s: ApiSettings,
+  detectorType: string,
+  params?: { monitorId?: number; hours?: number },
+): Promise<PluginAnalysisResponse> {
+  const usp = new URLSearchParams();
+  if (params?.monitorId) usp.set("monitor_id", String(params.monitorId));
+  if (params?.hours) usp.set("hours", String(params.hours));
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/plugins/detectors/${encodeURIComponent(detectorType)}/analysis?${usp.toString()}`,
+    s.token,
+  );
+}
+
+export async function getPluginPackageAnalysis(
+  s: ApiSettings,
+  packageId: string,
+  params?: { hours?: number },
+): Promise<PluginAnalysisResponse> {
+  const usp = new URLSearchParams();
+  if (params?.hours) usp.set("hours", String(params.hours));
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/plugins/packages/${encodeURIComponent(packageId)}/analysis?${usp.toString()}`,
+    s.token,
+  );
+}
+
 export async function getDetectorAggregate(
   s: ApiSettings,
   detectorType: string,
   params: {
     projectId?: string;
+    monitorId?: number;
     start?: string;
     end?: string;
     interval?: string;
@@ -340,6 +461,7 @@ export async function getDetectorAggregate(
 ): Promise<AggregateResponse> {
   const usp = new URLSearchParams();
   if (params.projectId) usp.set("project_id", params.projectId);
+  if (params.monitorId) usp.set("monitor_id", String(params.monitorId));
   if (params.start) usp.set("start", params.start);
   if (params.end) usp.set("end", params.end);
   if (params.interval) usp.set("interval", params.interval);
@@ -410,13 +532,31 @@ export type ActiveSeriesResponse = {
   series: BucketCount[];
 };
 
+export type DistributionDim =
+  "os" | "browser" | "country" | "region" | "city" | "asn_org";
+export type DistributionMetric = "events" | "users";
+export type DistributionBucket = "day" | "week" | "month" | "year";
 export type DistItem = { key: string; count: number };
 export type DistributionResponse = {
   project_id: number;
   dim: string;
+  metric?: DistributionMetric;
   start: string;
   end: string;
   items: DistItem[];
+};
+export type DistributionSeriesBucket = {
+  bucket: string;
+  items: DistItem[];
+};
+export type DistributionSeriesResponse = {
+  project_id: number;
+  dim: string;
+  metric: DistributionMetric;
+  bucket: DistributionBucket;
+  start: string;
+  end: string;
+  series: DistributionSeriesBucket[];
 };
 
 export type RetentionPoint = { day: number; active: number; rate: number };
@@ -783,7 +923,8 @@ export async function getActiveSeries(
 export async function getDistribution(
   s: ApiSettings,
   params: {
-    dim: "os" | "browser" | "country" | "region" | "city" | "asn_org";
+    dim: DistributionDim;
+    metric?: DistributionMetric;
     start?: string;
     end?: string;
     limit?: number;
@@ -791,11 +932,36 @@ export async function getDistribution(
 ): Promise<DistributionResponse> {
   const usp = new URLSearchParams();
   usp.set("dim", params.dim);
+  if (params.metric) usp.set("metric", params.metric);
   if (params.start) usp.set("start", params.start);
   if (params.end) usp.set("end", params.end);
   usp.set("limit", String(params.limit ?? 10));
   return fetchJSON(
     `${s.apiBase}/api/${s.projectId}/analytics/dist?${usp.toString()}`,
+    s.token,
+  );
+}
+
+export async function getDistributionSeries(
+  s: ApiSettings,
+  params: {
+    dim: DistributionDim;
+    metric?: DistributionMetric;
+    bucket: DistributionBucket;
+    start?: string;
+    end?: string;
+    limit?: number;
+  },
+): Promise<DistributionSeriesResponse> {
+  const usp = new URLSearchParams();
+  usp.set("dim", params.dim);
+  usp.set("bucket", params.bucket);
+  if (params.metric) usp.set("metric", params.metric);
+  if (params.start) usp.set("start", params.start);
+  if (params.end) usp.set("end", params.end);
+  usp.set("limit", String(params.limit ?? 10));
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/analytics/dist/series?${usp.toString()}`,
     s.token,
   );
 }

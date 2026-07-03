@@ -7,6 +7,7 @@ import {
   getRetention,
   getTopEvents,
   getUserGrowth,
+  listPluginViews,
   postCustomAnalytics,
   type ActiveSeriesResponse,
   type CleanupPolicy,
@@ -29,17 +30,35 @@ import { Sparkline } from "../components/Sparkline";
 import { useNavigate } from "react-router-dom";
 import { EventAnalyticsPanel } from "./analytics/EventAnalyticsPanel";
 import { PropertyAnalyticsPanel } from "./analytics/PropertyAnalyticsPanel";
+import { extensionFromApi } from "../pluginExtensions/api";
+import type { PluginExtensionDescriptor } from "../pluginExtensions/registry";
+import { pluginExtensionRegistry } from "../pluginExtensions/registry";
+import { PluginAnalysisView } from "../pluginExtensions/PluginAnalysisView";
 
 export function AnalyticsPage() {
-  const [tab, setTab] = useState<"basic" | "event" | "property">("basic");
+  const [tab, setTab] = useState("basic");
   const settings = useMemo(() => loadSettings(), []);
   const nav = useNavigate();
+  const [remoteTabs, setRemoteTabs] = useState<PluginExtensionDescriptor[]>([]);
+  const [remoteTabsLoaded, setRemoteTabsLoaded] = useState(false);
+  const [pluginViewsVersion, setPluginViewsVersion] = useState(0);
+  const pluginTabs = useMemo(
+    () =>
+      remoteTabsLoaded
+        ? remoteTabs
+        : mergeExtensions(pluginExtensionRegistry.getAnalyticsTabs(), remoteTabs),
+    [remoteTabs, remoteTabsLoaded],
+  );
   const [dau, setDau] = useState<ActiveSeriesResponse | null>(null);
   const [mau, setMau] = useState<ActiveSeriesResponse | null>(null);
   const [osDist, setOsDist] = useState<DistributionResponse | null>(null);
   const [countryDist, setCountryDist] = useState<DistributionResponse | null>(
     null,
   );
+  const [regionDist, setRegionDist] = useState<DistributionResponse | null>(
+    null,
+  );
+  const [cityDist, setCityDist] = useState<DistributionResponse | null>(null);
   const [operatorDist, setOperatorDist] = useState<DistributionResponse | null>(
     null,
   );
@@ -78,22 +97,27 @@ export function AnalyticsPage() {
       try {
         if (!settings.token || !settings.projectId) return;
         setErr("");
-        const [d, m, os, country, op, ret, top, cp, ug] = await Promise.all([
-          getActiveSeries(settings, { bucket: "day" }),
-          getActiveSeries(settings, { bucket: "month" }),
-          getDistribution(settings, { dim: "os", limit: 10 }),
-          getDistribution(settings, { dim: "country", limit: 10 }),
-          getDistribution(settings, { dim: "asn_org", limit: 10 }),
-          getRetention(settings),
-          getTopEvents(settings, { limit: 20 }),
-          getCleanupPolicy(settings).catch(() => null),
-          getUserGrowth(settings, buildUserGrowthRange()).catch(() => null),
-        ]);
+        const [d, m, os, country, region, city, op, ret, top, cp, ug] =
+          await Promise.all([
+            getActiveSeries(settings, { bucket: "day" }),
+            getActiveSeries(settings, { bucket: "month" }),
+            getDistribution(settings, { dim: "os", limit: 10 }),
+            getDistribution(settings, { dim: "country", limit: 10 }),
+            getDistribution(settings, { dim: "region", limit: 10 }),
+            getDistribution(settings, { dim: "city", limit: 10 }),
+            getDistribution(settings, { dim: "asn_org", limit: 10 }),
+            getRetention(settings),
+            getTopEvents(settings, { limit: 20 }),
+            getCleanupPolicy(settings).catch(() => null),
+            getUserGrowth(settings, buildUserGrowthRange()).catch(() => null),
+          ]);
         if (cancelled) return;
         setDau(d);
         setMau(m);
         setOsDist(os);
         setCountryDist(country);
+        setRegionDist(region);
+        setCityDist(city);
         setOperatorDist(op);
         setRetention(ret);
         setTopEvents(top);
@@ -108,6 +132,38 @@ export function AnalyticsPage() {
       cancelled = true;
     };
   }, [settings.apiBase, settings.projectId]);
+
+  useEffect(() => {
+    const onChanged = () => setPluginViewsVersion((v) => v + 1);
+    window.addEventListener("plugin-settings-changed", onChanged);
+    return () => window.removeEventListener("plugin-settings-changed", onChanged);
+  }, []);
+
+  useEffect(() => {
+    if (!settings.token || !settings.projectId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listPluginViews(settings);
+        if (cancelled) return;
+        setRemoteTabs(
+          res.items
+            .map(extensionFromApi)
+            .filter((item): item is PluginExtensionDescriptor => Boolean(item))
+            .filter((item) => item.surface === "analytics_tab"),
+        );
+        setRemoteTabsLoaded(true);
+      } catch {
+        if (!cancelled) {
+          setRemoteTabs([]);
+          setRemoteTabsLoaded(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.apiBase, settings.token, settings.projectId, pluginViewsVersion]);
 
   return (
     <div className="flex gap-4">
@@ -152,6 +208,21 @@ export function AnalyticsPage() {
           >
             属性分析
           </button>
+          {pluginTabs.map((pluginTab) => (
+            <button
+              key={pluginTab.id}
+              type="button"
+              className={
+                "w-full rounded-md px-2 py-1 text-left " +
+                (tab === pluginTab.id
+                  ? "bg-zinc-800 text-zinc-50"
+                  : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100")
+              }
+              onClick={() => setTab(pluginTab.id)}
+            >
+              {pluginTab.title}
+            </button>
+          ))}
         </nav>
       </aside>
       <main className="flex-1 space-y-4">
@@ -174,6 +245,8 @@ export function AnalyticsPage() {
             mau={mau}
             osDist={osDist}
             countryDist={countryDist}
+            regionDist={regionDist}
+            cityDist={cityDist}
             operatorDist={operatorDist}
             retention={retention}
             topEvents={topEvents}
@@ -203,9 +276,29 @@ export function AnalyticsPage() {
         {tab === "property" ? (
           <PropertyAnalyticsPanel settings={settings} />
         ) : null}
+
+        {pluginTabs.map((pluginTab) =>
+          tab === pluginTab.id ? (
+            <PluginAnalysisView
+              key={pluginTab.id}
+              extension={pluginTab}
+              settings={settings}
+            />
+          ) : null,
+        )}
       </main>
     </div>
   );
+}
+
+function mergeExtensions(
+  local: PluginExtensionDescriptor[],
+  remote: PluginExtensionDescriptor[],
+): PluginExtensionDescriptor[] {
+  const map = new Map<string, PluginExtensionDescriptor>();
+  for (const item of local) map.set(item.id, item);
+  for (const item of remote) map.set(item.id, item);
+  return Array.from(map.values()).sort((a, b) => a.title.localeCompare(b.title));
 }
 
 type BasicAnalyticsProps = {
@@ -213,6 +306,8 @@ type BasicAnalyticsProps = {
   mau: ActiveSeriesResponse | null;
   osDist: DistributionResponse | null;
   countryDist: DistributionResponse | null;
+  regionDist: DistributionResponse | null;
+  cityDist: DistributionResponse | null;
   operatorDist: DistributionResponse | null;
   retention: RetentionResponse | null;
   topEvents: TopEventsResponse | null;
@@ -242,6 +337,8 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
     mau,
     osDist,
     countryDist,
+    regionDist,
+    cityDist,
     operatorDist,
     retention,
     topEvents,
@@ -437,17 +534,38 @@ function BasicAnalyticsPanel(props: BasicAnalyticsProps) {
         </Panel>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Panel title="终端系统（Top 10 / 近 7 天）">
           <DistTable
             data={osDist}
             emptyHint="暂无 OS 数据（需 SDK 上报 contexts.os 或 tags.device_id）"
           />
         </Panel>
-        <Panel title="国家/地区（Top 10 / 近 7 天）">
+        <Panel
+          title="国家/地区（Top 10 / 近 7 天）"
+          right={<DistributionMoreLink dim="country" />}
+        >
           <DistTable
             data={countryDist}
-            emptyHint="暂无国家分布（需要配置 GeoIP mmdb）"
+            emptyHint="暂无国家分布（需要配置 GeoIP City mmdb）"
+          />
+        </Panel>
+        <Panel
+          title="省份/州（Top 10 / 近 7 天）"
+          right={<DistributionMoreLink dim="region" />}
+        >
+          <DistTable
+            data={regionDist}
+            emptyHint="暂无省份分布（需要配置 GeoIP City mmdb）"
+          />
+        </Panel>
+        <Panel
+          title="城市（Top 10 / 近 7 天）"
+          right={<DistributionMoreLink dim="city" />}
+        >
+          <DistTable
+            data={cityDist}
+            emptyHint="暂无城市分布（需要配置 GeoIP City mmdb）"
           />
         </Panel>
         <Panel title="运营商/组织（Top 10 / 近 7 天）">
@@ -638,6 +756,17 @@ function DistTable(props: {
         ))}
       </div>
     </div>
+  );
+}
+
+function DistributionMoreLink(props: { dim: "country" | "region" | "city" }) {
+  return (
+    <a
+      href={`/analytics/distribution?dim=${props.dim}`}
+      className="btn btn-xs btn-outline"
+    >
+      更多
+    </a>
   );
 }
 

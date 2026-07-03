@@ -75,8 +75,11 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 		if !trustedProxyEnabled {
 			authed.GET("/internal/metrics", query.DebugMetricsHandler(stats))
 		}
+		authed.GET("/plugins/packages", query.ListDetectorPackagesHandler(detectorService))
+		authed.GET("/plugins/views", query.ListPluginViewsHandler(detectorService))
 		authed.GET("/plugins/detectors", query.ListDetectorsHandler(detectorService))
 		authed.GET("/plugins/detectors/:detectorType/schema", query.GetDetectorSchemaHandler(detectorService))
+		authed.GET("/plugins/detectors/:detectorType/views", query.ListDetectorViewsHandler(detectorService))
 		authed.GET("/plugins/detectors/:detectorType/health", query.DetectorHealthHandler(detectorService))
 		authed.GET("/plugins/detectors/:detectorType/aggregate", query.DetectorAggregateHandler(detectorService, detectorStore))
 		authed.GET("/projects", query.ListProjectsHandler(db))
@@ -189,11 +192,17 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 				monitors.POST("/:monitorId/run", query.RunMonitorNowHandler(db))
 				monitors.POST("/:monitorId/test", query.TestMonitorHandler(db, detectorService))
 			}
+			queryAPI.GET("/plugins/views", query.ProjectPluginViewsHandler(db, detectorService))
+			queryAPI.GET("/plugins/packages/:packageId/settings", query.GetPluginPackageSettingHandler(db, detectorService))
+			queryAPI.PUT("/plugins/packages/:packageId/settings", query.UpsertPluginPackageSettingHandler(db, detectorService))
+			queryAPI.GET("/plugins/packages/:packageId/analysis", query.PluginPackageAnalysisHandler(db, detectorStore))
+			queryAPI.GET("/plugins/detectors/:detectorType/analysis", query.DetectorAnalysisHandler(db, detectorStore))
 		}
 		queryAPI.GET("/metrics/today", query.MetricsTodayHandler(recorder, db))
 		queryAPI.GET("/metrics/total", query.MetricsTotalHandler(recorder, db))
 		queryAPI.GET("/analytics/active", query.ActiveSeriesHandler(recorder, db))
 		queryAPI.GET("/analytics/dist", query.DistributionHandler(recorder))
+		queryAPI.GET("/analytics/dist/series", query.DistributionSeriesHandler(recorder))
 		queryAPI.GET("/analytics/retention", query.RetentionHandler(recorder, db))
 		queryAPI.GET("/properties/schema", query.ListPropertyDefinitionsHandler(db))
 		queryAPI.POST("/properties/schema", query.CreatePropertyDefinitionHandler(db))

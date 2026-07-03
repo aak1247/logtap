@@ -35,6 +35,20 @@ func (s *Service) ListDescriptors() ([]Descriptor, error) {
 	return s.Registry.List(), nil
 }
 
+func (s *Service) ListPackages() ([]PackageManifest, error) {
+	if s == nil || s.Registry == nil {
+		return nil, ErrServiceNotConfigured
+	}
+	return s.Registry.ListPackages(), nil
+}
+
+func (s *Service) ListViews(detectorType string) ([]ViewDescriptor, error) {
+	if s == nil || s.Registry == nil {
+		return nil, ErrServiceNotConfigured
+	}
+	return s.Registry.ListViews(detectorType), nil
+}
+
 func (s *Service) GetSchema(detectorType string) (json.RawMessage, error) {
 	p, err := s.getPlugin(detectorType)
 	if err != nil {
