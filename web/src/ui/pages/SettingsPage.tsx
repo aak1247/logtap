@@ -186,10 +186,7 @@ export function SettingsPage() {
 
       <div className="flex flex-col gap-4 lg:flex-row">
         <aside className="border-b border-zinc-900 pb-3 lg:w-52 lg:shrink-0 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-4">
-          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 lg:px-2">
-            设置
-          </div>
-          <nav className="mt-3 flex flex-wrap gap-2 text-sm lg:flex-col lg:gap-1">
+          <nav className="flex flex-wrap gap-2 text-sm lg:flex-col lg:gap-1">
             {SETTINGS_SECTIONS.map((s) => (
               <NavLink
                 key={s.id}

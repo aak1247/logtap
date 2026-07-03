@@ -75,13 +75,6 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 		if !trustedProxyEnabled {
 			authed.GET("/internal/metrics", query.DebugMetricsHandler(stats))
 		}
-		authed.GET("/plugins/packages", query.ListDetectorPackagesHandler(detectorService))
-		authed.GET("/plugins/views", query.ListPluginViewsHandler(detectorService))
-		authed.GET("/plugins/detectors", query.ListDetectorsHandler(detectorService))
-		authed.GET("/plugins/detectors/:detectorType/schema", query.GetDetectorSchemaHandler(detectorService))
-		authed.GET("/plugins/detectors/:detectorType/views", query.ListDetectorViewsHandler(detectorService))
-		authed.GET("/plugins/detectors/:detectorType/health", query.DetectorHealthHandler(detectorService))
-		authed.GET("/plugins/detectors/:detectorType/aggregate", query.DetectorAggregateHandler(detectorService, detectorStore))
 		authed.GET("/projects", query.ListProjectsHandler(db))
 		authed.POST("/projects", query.CreateProjectHandler(db))
 		authed.GET("/projects/:projectId", query.GetProjectHandler(db))
@@ -89,6 +82,23 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 		authed.GET("/projects/:projectId/keys", query.ListProjectKeysHandler(db))
 		authed.POST("/projects/:projectId/keys", query.CreateProjectKeyHandler(db))
 		authed.POST("/projects/:projectId/keys/:keyId/revoke", query.RevokeProjectKeyHandler(db))
+
+		pluginAPI := apiRoot.Group("/plugins")
+		pluginAPI.Use(requireAuthReadyMiddleware(db, cfg.AuthSecret))
+		if authEnabled {
+			if trustedProxyEnabled {
+				pluginAPI.Use(acceptProxySecretMiddleware(cfg.LogtapProxySecret), RequireUserOrProxy(cfg.AuthSecret))
+			} else {
+				pluginAPI.Use(RequireUser(cfg.AuthSecret))
+			}
+		}
+		pluginAPI.GET("/packages", query.ListDetectorPackagesHandler(detectorService))
+		pluginAPI.GET("/views", query.ListPluginViewsHandler(detectorService))
+		pluginAPI.GET("/detectors", query.ListDetectorsHandler(detectorService))
+		pluginAPI.GET("/detectors/:detectorType/schema", query.GetDetectorSchemaHandler(detectorService))
+		pluginAPI.GET("/detectors/:detectorType/views", query.ListDetectorViewsHandler(detectorService))
+		pluginAPI.GET("/detectors/:detectorType/health", query.DetectorHealthHandler(detectorService))
+		pluginAPI.GET("/detectors/:detectorType/aggregate", query.DetectorAggregateHandler(detectorService, detectorStore))
 	}
 
 	ingestAPI := router.Group("/api/:projectId")
