@@ -13,9 +13,12 @@ const navItemActive = "bg-zinc-900 text-zinc-100";
 export function RootLayout(props?: {
   extraNavItems?: ReactNode;
   allowApiBaseEdit?: boolean;
+  collapseSettingsToUserMenu?: boolean;
+  userMenuItems?: ReactNode;
 }) {
   const s = useSyncExternalStore(subscribeSettingsChange, loadSettings, loadSettings);
   const extraNavItems: ReactNode = props?.extraNavItems ?? null;
+  const userMenuItems: ReactNode = props?.userMenuItems ?? null;
   const [remotePages, setRemotePages] = useState<PluginExtensionDescriptor[]>([]);
   const [remotePagesLoaded, setRemotePagesLoaded] = useState(false);
   const [pluginViewsVersion, setPluginViewsVersion] = useState(0);
@@ -119,14 +122,16 @@ export function RootLayout(props?: {
               <Link to="/docs" className={navItem}>
                 文档
               </Link>
-              <NavLink
-                to="/settings"
-                className={({ isActive }) =>
-                  `${navItem} ${isActive ? navItemActive : ""}`
-                }
-              >
-                设置
-              </NavLink>
+              {!props?.collapseSettingsToUserMenu ? (
+                <NavLink
+                  to="/settings"
+                  className={({ isActive }) =>
+                    `${navItem} ${isActive ? navItemActive : ""}`
+                  }
+                >
+                  设置
+                </NavLink>
+              ) : null}
               {pluginPages.map((page) =>
                 page.path ? (
                   <NavLink
@@ -142,6 +147,33 @@ export function RootLayout(props?: {
               )}
               {extraNavItems}
             </nav>
+            {props?.collapseSettingsToUserMenu || userMenuItems ? (
+              <details className="relative">
+                <summary
+                  className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-full bg-zinc-900 text-xs font-semibold text-zinc-100 ring-1 ring-zinc-800 transition-colors hover:bg-zinc-800 [&::-webkit-details-marker]:hidden"
+                  title="账号菜单"
+                >
+                  LT
+                </summary>
+                <div className="absolute right-0 mt-2 w-44 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 py-1 shadow-xl shadow-black/30">
+                  {props?.collapseSettingsToUserMenu ? (
+                    <NavLink
+                      to="/settings"
+                      className={({ isActive }) =>
+                        `block px-3 py-2 text-sm transition-colors ${
+                          isActive
+                            ? "bg-zinc-900 text-zinc-100"
+                            : "text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+                        }`
+                      }
+                    >
+                      设置
+                    </NavLink>
+                  ) : null}
+                  {userMenuItems}
+                </div>
+              </details>
+            ) : null}
           </div>
         </div>
       </header>
