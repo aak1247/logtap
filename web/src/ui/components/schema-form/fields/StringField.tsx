@@ -25,12 +25,12 @@ export function StringField(props: FieldProps) {
   return (
     <div>
       <label className="block">
-        <div className="text-xs text-zinc-400">
+        <div className="field-label">
           {schema.title ?? path}
           {required && <span className="ml-1 text-red-400">*</span>}
         </div>
         {schema.description && (
-          <div className="mb-1 text-xs text-zinc-500">{schema.description}</div>
+          <div className="field-hint mb-1">{schema.description}</div>
         )}
         <input
           type={inputType}
@@ -39,10 +39,8 @@ export function StringField(props: FieldProps) {
           onBlur={handleBlur}
           disabled={disabled}
           className={cn(
-            'mt-1 w-full rounded-md border px-3 py-2 text-sm text-zinc-100 outline-none',
-            'bg-zinc-950 focus:border-indigo-500',
-            displayError ? 'border-red-500' : 'border-zinc-800',
-            disabled && 'cursor-not-allowed opacity-60'
+            'input mt-1',
+            displayError && 'border-red-500 focus:border-red-500 focus:ring-red-500/20'
           )}
           placeholder={schema.description ?? ''}
         />

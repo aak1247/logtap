@@ -24,7 +24,7 @@ export function FallbackField(props: FieldProps) {
 
   return (
     <div>
-      <div className="mb-1 text-xs text-zinc-400">
+      <div className="field-label mb-1">
         {schema.title ?? path}
         <span className="ml-2 text-zinc-500">(JSON)</span>
       </div>
@@ -35,10 +35,8 @@ export function FallbackField(props: FieldProps) {
         rows={6}
         spellCheck={false}
         className={cn(
-          'w-full rounded-md border px-3 py-2 font-mono text-xs text-zinc-100 outline-none',
-          'bg-zinc-950 focus:border-indigo-500',
-          error || jsonError ? 'border-red-500' : 'border-zinc-800',
-          disabled && 'cursor-not-allowed opacity-60'
+          'input font-mono text-xs',
+          (error || jsonError) && 'border-red-500 focus:border-red-500 focus:ring-red-500/20'
         )}
       />
       {(error || jsonError) && (

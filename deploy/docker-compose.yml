@@ -55,6 +55,7 @@ services:
       # Required: base64 secret (decoded length >= 32 bytes).
       # Generate: `task auth:secret` (run in repo `logtap/`).
       AUTH_SECRET: "${AUTH_SECRET}"
+      LOGTAP_CLOUD_URL: "${LOGTAP_CLOUD_URL:-https://logtap.hivescale.net}"
       # Optional: GeoLite2 mmdb download (recommended for distribution/analytics with GeoIP).
       MAXMIND_LICENSE_KEY: "${MAXMIND_LICENSE_KEY}"
       GEOIP_DIR: "/data/geoip"

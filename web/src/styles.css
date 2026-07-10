@@ -15,6 +15,7 @@
   html {
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+    background: #09090b;
   }
 
   *::-webkit-scrollbar {
@@ -94,11 +95,39 @@
   .btn-icon-danger {
     @apply border-red-900/60 text-red-300 hover:bg-red-950/30 hover:text-red-100;
   }
+
+  .input {
+    @apply w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .input-compact {
+    @apply h-9 px-2.5 py-1.5 text-xs;
+  }
+
+  .field-label {
+    @apply block text-xs font-medium text-zinc-300;
+  }
+
+  .field-hint {
+    @apply mt-1 block text-[11px] leading-4 text-zinc-500;
+  }
+
+  .check-input {
+    @apply h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-indigo-500 accent-indigo-500 focus:ring-2 focus:ring-indigo-500/25;
+  }
 }
 
 html,
 body {
   height: 100%;
+  min-height: 100%;
+  background: #09090b;
+  color: #f4f4f5;
+}
+
+#root {
+  min-height: 100%;
+  background: #09090b;
 }
 
 code {

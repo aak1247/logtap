@@ -8,6 +8,7 @@ export function LoginPage() {
   const initial = useMemo(() => loadSettings(), []);
   const nav = useNavigate();
   const loc = useLocation();
+  const nextPath = useMemo(() => safeNextPath(loc.search), [loc.search]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -16,8 +17,8 @@ export function LoginPage() {
   const [statusChecked, setStatusChecked] = useState(false);
 
   useEffect(() => {
-    if (initial.token) nav("/projects");
-  }, [initial.token, nav]);
+    if (initial.token) nav(nextPath || "/projects");
+  }, [initial.token, nav, nextPath]);
 
   useEffect(() => {
     const qp = new URLSearchParams(loc.search);
@@ -103,7 +104,7 @@ export function LoginPage() {
                         : cur.selfLogProjectId,
                       selfLogProjectKey: res.self_log?.project_key || cur.selfLogProjectKey,
                     });
-                    window.location.href = "/projects";
+                    window.location.href = nextPath || "/projects";
                   } catch (e) {
                     setLoginErr(e instanceof Error ? e.message : String(e));
                   } finally {
@@ -119,4 +120,12 @@ export function LoginPage() {
       </div>
     </div>
   );
+}
+
+function safeNextPath(search: string): string {
+  const raw = new URLSearchParams(search).get("next")?.trim() || "";
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.startsWith("/login")) {
+    return "";
+  }
+  return raw;
 }

@@ -41,5 +41,8 @@ if [ -z "${GEOIP_ASN_MMDB:-}" ] && [ -f "${ASN_MMDB}" ]; then
   export GEOIP_ASN_MMDB="${ASN_MMDB}"
 fi
 
-exec /gateway
+if [ -z "${LOGTAP_CLOUD_URL:-}" ]; then
+  export LOGTAP_CLOUD_URL="https://logtap.hivescale.net"
+fi
 
+exec /gateway

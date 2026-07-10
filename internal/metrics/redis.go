@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aak1247/logtap/internal/model"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -17,6 +18,21 @@ type RedisRecorder struct {
 	dayTTL   time.Duration
 	distTTL  time.Duration
 	monthTTL time.Duration
+}
+
+type RebuildProjectOptions struct {
+	ProjectID  int
+	Since      *time.Time
+	Until      *time.Time
+	BatchSize  int
+	ResetRedis bool
+}
+
+type RebuildProjectResult struct {
+	ProjectID int   `json:"project_id"`
+	Logs      int64 `json:"logs"`
+	Events    int64 `json:"events"`
+	Enabled   bool  `json:"enabled"`
 }
 
 type RecorderOption func(*RedisRecorder)
@@ -162,6 +178,105 @@ func (r *RedisRecorder) ObserveLog(ctx context.Context, projectID int, level str
 	}
 	_, _ = pipe.Exec(ctx)
 	r.expireKeys(ctx, expire)
+}
+
+func (r *RedisRecorder) RebuildProjectFromDB(ctx context.Context, db *gorm.DB, opts RebuildProjectOptions) (RebuildProjectResult, error) {
+	res := RebuildProjectResult{ProjectID: opts.ProjectID, Enabled: r != nil && r.rdb != nil}
+	if r == nil || r.rdb == nil || db == nil || opts.ProjectID <= 0 {
+		return res, nil
+	}
+	batchSize := opts.BatchSize
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+	if opts.ResetRedis {
+		if err := r.DeleteProjectMetrics(ctx, opts.ProjectID); err != nil {
+			return res, err
+		}
+	}
+	if db.Migrator().HasTable(model.Log{}.TableName()) {
+		q := db.WithContext(ctx).Where("project_id = ?", opts.ProjectID)
+		q = applyRebuildRange(q, opts.Since, opts.Until)
+		var rows []model.Log
+		if err := q.Order("timestamp ASC, id ASC").FindInBatches(&rows, batchSize, func(tx *gorm.DB, _ int) error {
+			for _, row := range rows {
+				r.ObserveLog(ctx, row.ProjectID, row.Level, row.DistinctID, row.DeviceID, row.Timestamp)
+				res.Logs++
+			}
+			return nil
+		}).Error; err != nil {
+			return res, err
+		}
+	}
+	if db.Migrator().HasTable(model.Event{}.TableName()) {
+		q := db.WithContext(ctx).Where("project_id = ?", opts.ProjectID)
+		q = applyRebuildRange(q, opts.Since, opts.Until)
+		var rows []model.Event
+		if err := q.Order("timestamp ASC").FindInBatches(&rows, batchSize, func(tx *gorm.DB, _ int) error {
+			for _, row := range rows {
+				r.ObserveEvent(ctx, row.ProjectID, row.Level, row.DistinctID, row.DeviceID, row.OS, row.Timestamp)
+				r.ObserveEventDist(ctx, row.ProjectID, row.Timestamp, row.DistinctID, map[string]string{"os": row.OS})
+				res.Events++
+			}
+			return nil
+		}).Error; err != nil {
+			return res, err
+		}
+	}
+	return res, nil
+}
+
+func (r *RedisRecorder) DeleteProjectMetrics(ctx context.Context, projectID int) error {
+	if r == nil || r.rdb == nil || projectID <= 0 {
+		return nil
+	}
+	patterns := []string{
+		fmt.Sprintf("metrics:logs:%d:*", projectID),
+		fmt.Sprintf("metrics:events:%d:*", projectID),
+		fmt.Sprintf("metrics:errors:%d:*", projectID),
+		fmt.Sprintf("metrics:users:%d:*", projectID),
+		fmt.Sprintf("metrics:totals:%d:*", projectID),
+		fmt.Sprintf("active:dau:%d:*", projectID),
+		fmt.Sprintf("active:mau:%d:*", projectID),
+		fmt.Sprintf("active:devices:%d:*", projectID),
+		fmt.Sprintf("dist:*:%d:*", projectID),
+		fmt.Sprintf("dist_users:*:%d:*", projectID),
+	}
+	for _, pattern := range patterns {
+		if err := r.deleteByPattern(ctx, pattern); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *RedisRecorder) deleteByPattern(ctx context.Context, pattern string) error {
+	var cursor uint64
+	for {
+		keys, next, err := r.rdb.Scan(ctx, cursor, pattern, 500).Result()
+		if err != nil {
+			return err
+		}
+		if len(keys) > 0 {
+			if err := r.rdb.Del(ctx, keys...).Err(); err != nil {
+				return err
+			}
+		}
+		cursor = next
+		if cursor == 0 {
+			return nil
+		}
+	}
+}
+
+func applyRebuildRange(q *gorm.DB, since *time.Time, until *time.Time) *gorm.DB {
+	if since != nil {
+		q = q.Where("timestamp >= ?", since.UTC())
+	}
+	if until != nil {
+		q = q.Where("timestamp < ?", until.UTC())
+	}
+	return q
 }
 
 func (r *RedisRecorder) expireKeys(ctx context.Context, keys map[string]time.Duration) {

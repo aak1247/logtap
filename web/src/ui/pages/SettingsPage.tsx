@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   cleanupEventsBefore,
@@ -14,14 +14,20 @@ import {
   upsertPluginPackageSetting,
   type CleanupPolicy,
   type PluginPackage,
+  type PluginPackageConfig,
   type PluginPackageSetting,
   type ProjectKey,
 } from "../../lib/api";
 import { clampFunnelDays, loadFunnelDays } from "../../lib/prefs";
 import { clearAuth, loadSettings, saveSettings } from "../../lib/storage";
 import { Panel } from "../components/Panel";
+import { SchemaForm, type JsonSchema } from "../components/schema-form";
 import type { ApiSettings, EventDefinition, PropertyDefinition } from "../../lib/api";
 import { listEventDefinitions, createEventDefinition, updateEventDefinition, listPropertyDefinitions, createPropertyDefinition, updatePropertyDefinition } from "../../lib/api";
+
+const CloudMigrationPanel = lazy(() =>
+  import("./CloudMigrationPage").then((mod) => ({ default: mod.CloudMigrationPanel })),
+);
 
 const SETTINGS_SECTIONS = [
   { id: "project", label: "项目设置" },
@@ -31,12 +37,25 @@ const SETTINGS_SECTIONS = [
   { id: "properties", label: "属性定义" },
 ] as const;
 
-type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
+const CLOUD_MIGRATION_SECTION = { id: "cloud", label: "上云迁移" } as const;
 
-export function SettingsPage() {
+type SettingsSection = { id: string; label: string };
+
+export function SettingsPage(props: {
+  showCloudMigration?: boolean;
+  extraSections?: SettingsSection[];
+  renderExtraSection?: (sectionId: string) => ReactNode;
+} = {}) {
   const nav = useNavigate();
   const loc = useLocation();
   const funnelDays = useMemo(() => clampFunnelDays(loadFunnelDays()), []);
+  const sections = useMemo(
+    () => {
+      const base: SettingsSection[] = props.showCloudMigration === false ? [...SETTINGS_SECTIONS] : [...SETTINGS_SECTIONS, CLOUD_MIGRATION_SECTION];
+      return [...base, ...(props.extraSections ?? [])];
+    },
+    [props.showCloudMigration, props.extraSections],
+  );
 
   const [settings, setSettings] = useState(() => loadSettings());
 
@@ -62,7 +81,7 @@ export function SettingsPage() {
   );
 
   const params = useParams<{ section?: string }>();
-  const activeSection: SettingsSectionId = (SETTINGS_SECTIONS.find((s) => s.id === params.section)?.id ?? "project");
+  const activeSection = (sections.find((s) => s.id === params.section)?.id ?? "project");
 
   useEffect(() => {
     const next = loadSettings();
@@ -82,16 +101,13 @@ export function SettingsPage() {
       nav("/login");
       return;
     }
-    if (!settings.projectId) {
-      nav("/projects");
-    }
   }, [settings.token, settings.projectId, nav]);
 
   useEffect(() => {
-    if (params.section && !SETTINGS_SECTIONS.some((s) => s.id === params.section)) {
+    if (params.section && !sections.some((s) => s.id === params.section)) {
       nav("/settings/project", { replace: true });
     }
-  }, [params.section, nav]);
+  }, [params.section, nav, sections]);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,7 +200,7 @@ export function SettingsPage() {
       <div className="flex flex-col gap-4 lg:flex-row">
         <aside className="border-b border-zinc-900 pb-3 lg:w-52 lg:shrink-0 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-4">
           <nav className="flex flex-wrap gap-2 text-sm lg:flex-col lg:gap-1">
-            {SETTINGS_SECTIONS.map((s) => (
+            {sections.map((s) => (
               <NavLink
                 key={s.id}
                 to={`/settings/${s.id}`}
@@ -207,6 +223,11 @@ export function SettingsPage() {
           {projectErr ? (
             <div className="mb-3 rounded-md border border-red-900/60 bg-red-950/40 p-3 text-xs text-red-200">
               {projectErr}
+            </div>
+          ) : null}
+          {!settings.projectId ? (
+            <div className="mb-3 rounded-md border border-amber-900/60 bg-amber-950/30 p-3 text-sm text-amber-100">
+              当前未选择项目。项目 Key、上报示例和清理策略需要先选择项目。
             </div>
           ) : null}
 
@@ -278,12 +299,12 @@ export function SettingsPage() {
 
             <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
               <div>
-                <div className="text-xs text-zinc-400">Key 名称</div>
+                <div className="field-label">Key 名称</div>
                 <input
                   value={newKeyName}
                   onChange={(e) => setNewKeyName(e.target.value)}
                   placeholder="default"
-                  className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-100 outline-none focus:border-indigo-500"
+                  className="input input-compact mt-1"
                 />
               </div>
               <div>
@@ -397,9 +418,10 @@ export function SettingsPage() {
               <div className="mt-3 text-sm text-zinc-500">未加载清理策略</div>
             ) : (
               <div className="mt-4 space-y-3">
-                <label className="flex items-center justify-between gap-3 text-sm">
-                  <span className="text-zinc-300">启用</span>
+                <label className="flex items-center justify-between gap-3 rounded-md border border-zinc-900 bg-zinc-950/60 px-3 py-2 text-sm">
+                  <span className="font-medium text-zinc-300">启用</span>
                   <input
+                    className="check-input"
                     type="checkbox"
                     checked={policyDraft.enabled}
                     onChange={(e) =>
@@ -530,12 +552,12 @@ export function SettingsPage() {
 
             <div className="mt-4 space-y-3">
               <div>
-                <div className="text-xs text-zinc-400">before（本地时间）</div>
+                <div className="field-label">before（本地时间）</div>
                 <input
                   type="datetime-local"
                   value={manualBeforeLocal}
                   onChange={(e) => setManualBeforeLocal(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+                  className="input mt-1"
                 />
               </div>
 
@@ -596,12 +618,86 @@ export function SettingsPage() {
           <PropertySchemaPanel settings={settings} />
         </Panel>
       ) : null}
+
+      {activeSection === "cloud" ? (
+        <Suspense fallback={<SettingsSectionFallback />}>
+          <CloudMigrationPanel />
+        </Suspense>
+      ) : null}
+
+      {!["project", "plugins", "cleanup", "events", "properties", "cloud"].includes(activeSection)
+        ? props.renderExtraSection?.(activeSection)
+        : null}
         </main>
       </div>
     </div>
   );
 }
 
+function SettingsSectionFallback() {
+  return (
+    <div className="space-y-4">
+      <div className="h-5 w-32 animate-pulse rounded bg-zinc-800" />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="h-40 animate-pulse rounded-lg bg-zinc-900/70" />
+        <div className="h-40 animate-pulse rounded-lg bg-zinc-900/70" />
+      </div>
+    </div>
+  );
+}
+
+
+const PLUGIN_PACKAGE_CONFIG_SCHEMA: JsonSchema = {
+  type: "object",
+  required: ["overviewCardsEnabled", "analyticsTabEnabled", "analysisHours"],
+  additionalProperties: false,
+  properties: {
+    overviewCardsEnabled: {
+      type: "boolean",
+      title: "显示概览页卡片",
+      default: true,
+    },
+    analyticsTabEnabled: {
+      type: "boolean",
+      title: "显示分析页 Tab",
+      default: true,
+    },
+    analysisHours: {
+      type: "integer",
+      title: "默认分析窗口(小时)",
+      default: 24,
+      minimum: 1,
+      maximum: 720,
+    },
+  },
+};
+
+function pluginConfigToFormValue(config: PluginPackageConfig): Record<string, unknown> {
+  return {
+    overviewCardsEnabled: config.overviewCardsEnabled,
+    analyticsTabEnabled: config.analyticsTabEnabled,
+    analysisHours: config.analysisHours ?? 24,
+  };
+}
+
+function normalizePluginConfigDraft(config: Record<string, unknown>): Partial<PluginPackageConfig> {
+  return {
+    overviewCardsEnabled: Boolean(config.overviewCardsEnabled),
+    analyticsTabEnabled: Boolean(config.analyticsTabEnabled),
+    analysisHours: clampInt(config.analysisHours, 24, 1, 720),
+  };
+}
+
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  const n =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseInt(value, 10)
+        : fallback;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+}
 
 function PluginSettingsPanel(props: { settings: ApiSettings }) {
   const { settings } = props;
@@ -610,9 +706,7 @@ function PluginSettingsPanel(props: { settings: ApiSettings }) {
   const [pluginSetting, setPluginSetting] = useState<PluginPackageSetting | null>(null);
   const [pluginDraft, setPluginDraft] = useState<{
     enabled: boolean;
-    overviewCardsEnabled: boolean;
-    analyticsTabEnabled: boolean;
-    analysisHours: string;
+    config: Record<string, unknown>;
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -654,9 +748,7 @@ function PluginSettingsPanel(props: { settings: ApiSettings }) {
         if (ps) {
           setPluginDraft({
             enabled: ps.enabled,
-            overviewCardsEnabled: ps.config.overviewCardsEnabled,
-            analyticsTabEnabled: ps.config.analyticsTabEnabled,
-            analysisHours: String(ps.config.analysisHours ?? 24),
+            config: pluginConfigToFormValue(ps.config),
           });
         }
       } catch (e) {
@@ -667,8 +759,6 @@ function PluginSettingsPanel(props: { settings: ApiSettings }) {
       cancelled = true;
     };
   }, [settings.apiBase, settings.token, settings.projectId, selectedId]);
-
-  const isConnectivity = selectedId === "builtin.connectivity";
 
   return (
     <Panel title="插件设置">
@@ -733,10 +823,11 @@ function PluginSettingsPanel(props: { settings: ApiSettings }) {
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-            <label className="flex items-center justify-between gap-3 rounded-lg border border-zinc-900 p-3 text-sm">
-              <span className="text-zinc-300">启用插件包</span>
+          <div className="mt-4 space-y-4">
+            <label className="flex items-center justify-between gap-3 rounded-lg border border-zinc-900 bg-zinc-950/60 p-3 text-sm transition-colors hover:border-zinc-800 hover:bg-zinc-900/30">
+              <span className="font-medium text-zinc-300">启用插件包</span>
               <input
+                className="check-input"
                 type="checkbox"
                 checked={pluginDraft.enabled}
                 onChange={(e) =>
@@ -746,48 +837,17 @@ function PluginSettingsPanel(props: { settings: ApiSettings }) {
                 }
               />
             </label>
-            {isConnectivity ? (
-              <>
-                <label className="flex items-center justify-between gap-3 rounded-lg border border-zinc-900 p-3 text-sm">
-                  <span className="text-zinc-300">显示概览页卡片</span>
-                  <input
-                    type="checkbox"
-                    checked={pluginDraft.overviewCardsEnabled}
-                    onChange={(e) =>
-                      setPluginDraft((prev) =>
-                        prev ? { ...prev, overviewCardsEnabled: e.target.checked } : prev,
-                      )
-                    }
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-3 rounded-lg border border-zinc-900 p-3 text-sm">
-                  <span className="text-zinc-300">显示分析页 Tab</span>
-                  <input
-                    type="checkbox"
-                    checked={pluginDraft.analyticsTabEnabled}
-                    onChange={(e) =>
-                      setPluginDraft((prev) =>
-                        prev ? { ...prev, analyticsTabEnabled: e.target.checked } : prev,
-                      )
-                    }
-                  />
-                </label>
-                <Field
-                  label="默认分析窗口(小时)"
-                  value={pluginDraft.analysisHours}
-                  onChange={(v) =>
-                    setPluginDraft((prev) =>
-                      prev ? { ...prev, analysisHours: v } : prev,
-                    )
-                  }
-                  placeholder="24"
-                />
-              </>
-            ) : (
-              <div className="md:col-span-2 rounded-lg border border-dashed border-zinc-800 p-3 text-xs text-zinc-500">
-                该插件暂未提供专属配置项，仅支持启用/停用。
-              </div>
-            )}
+            <div className="rounded-lg border border-zinc-900 bg-zinc-950/40 p-4">
+              <div className="mb-3 text-xs text-zinc-400">插件包配置</div>
+              <SchemaForm
+                schema={PLUGIN_PACKAGE_CONFIG_SCHEMA}
+                value={pluginDraft.config}
+                onChange={(config) =>
+                  setPluginDraft((prev) => (prev ? { ...prev, config } : prev))
+                }
+                disabled={busy}
+              />
+            </div>
           </div>
 
           <div className="mt-4 flex justify-end">
@@ -800,23 +860,14 @@ function PluginSettingsPanel(props: { settings: ApiSettings }) {
                   setBusy(true);
                   setMsg("");
                   setErr("");
-                  const configPayload = isConnectivity
-                    ? {
-                        overviewCardsEnabled: pluginDraft.overviewCardsEnabled,
-                        analyticsTabEnabled: pluginDraft.analyticsTabEnabled,
-                        analysisHours: Number(pluginDraft.analysisHours || "24"),
-                      }
-                    : {};
                   const saved = await upsertPluginPackageSetting(settings, selectedId, {
                     enabled: pluginDraft.enabled,
-                    config: configPayload,
+                    config: normalizePluginConfigDraft(pluginDraft.config),
                   });
                   setPluginSetting(saved);
                   setPluginDraft({
                     enabled: saved.enabled,
-                    overviewCardsEnabled: saved.config.overviewCardsEnabled,
-                    analyticsTabEnabled: saved.config.analyticsTabEnabled,
-                    analysisHours: String(saved.config.analysisHours ?? 24),
+                    config: pluginConfigToFormValue(saved.config),
                   });
                   window.dispatchEvent(new Event("plugin-settings-changed"));
                   setMsg("插件设置已保存");
@@ -1070,11 +1121,11 @@ function PropertySchemaPanel(props: { settings: ApiSettings }) {
         <Field label="key（属性标识，英文）" value={keyName} onChange={setKeyName} placeholder="plan" />
         <Field label="显示名" value={displayName} onChange={setDisplayName} placeholder="套餐" />
         <div>
-          <div className="text-xs text-zinc-400">类型</div>
+          <div className="field-label">类型</div>
           <select
             value={type}
             onChange={(e) => setType(e.target.value as "string" | "enum" | "number")}
-            className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+            className="input mt-1"
           >
             <option value="string">string</option>
             <option value="enum">enum</option>
@@ -1242,12 +1293,12 @@ function Field(props: {
 }) {
   return (
     <div>
-      <div className="text-xs text-zinc-400">{props.label}</div>
+      <div className="field-label">{props.label}</div>
       <input
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}
         placeholder={props.placeholder}
-        className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+        className="input mt-1"
       />
     </div>
   );

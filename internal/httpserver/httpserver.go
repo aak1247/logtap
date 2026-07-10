@@ -63,8 +63,17 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 			internal := apiRoot.Group("/internal")
 			internal.Use(requireProxySecretMiddleware(cfg.LogtapProxySecret))
 			internal.POST("/projects", query.InternalCreateProjectHandler(db))
+			internal.POST("/import/projects/:projectId/apply", query.InternalImportProjectApplyHandler(db, recorder))
+			internal.POST("/metrics/projects/:projectId/rebuild", query.InternalRebuildProjectMetricsHandler(db, recorder))
 			internal.GET("/metrics", query.DebugMetricsHandler(stats))
 		}
+
+		migrationAPI := apiRoot.Group("/migration")
+		if authEnabled {
+			migrationAPI.Use(RequireUser(cfg.AuthSecret))
+		}
+		migrationAPI.POST("/export/preview", query.MigrationPreviewHandler(db, query.MigrationConfig{DefaultCloudURL: cfg.MigrationCloudURL}))
+		migrationAPI.POST("/export/cloud", query.MigrationExportCloudHandler(db, query.MigrationConfig{DefaultCloudURL: cfg.MigrationCloudURL}))
 
 		authed := apiRoot.Group("")
 		authed.Use(requireAuthReadyMiddleware(db, cfg.AuthSecret))

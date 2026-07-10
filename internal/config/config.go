@@ -52,6 +52,7 @@ type Config struct {
 	AuthTokenTTL                 time.Duration
 	MaintenanceMode              bool
 	LogtapProxySecret            string
+	MigrationCloudURL            string
 	EnableDebugEndpoints         bool
 	DBRequireTimescale           bool
 	DBMigrationTimeout           time.Duration
@@ -162,6 +163,7 @@ Optional: set AUTH_SECRET_FILE=/path/to/secret (file contains the base64 secret)
 		AuthSecret:                   authSecret,
 		MaintenanceMode:              parseBoolDefault(getenvDefault("MAINTENANCE_MODE", "false"), false),
 		LogtapProxySecret:            strings.TrimSpace(os.Getenv("LOGTAP_PROXY_SECRET")),
+		MigrationCloudURL:            strings.TrimRight(strings.TrimSpace(getenvDefault("LOGTAP_CLOUD_URL", "https://logtap.hivescale.net")), "/"),
 		EnableDebugEndpoints:         parseBoolDefault(getenvDefault("ENABLE_DEBUG_ENDPOINTS", "false"), false),
 		DBRequireTimescale:           parseBoolDefault(getenvDefault("DB_REQUIRE_TIMESCALE", "false"), false),
 		DBMigrationTimeout:           parseDurationDefault(getenvDefault("DB_MIGRATION_TIMEOUT", "2m"), 2*time.Minute),

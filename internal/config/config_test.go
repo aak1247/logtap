@@ -30,6 +30,7 @@ func TestFromEnv_DefaultsAndToggles(t *testing.T) {
 	t.Setenv("AUTH_SECRET", base64.RawStdEncoding.EncodeToString(make([]byte, 32)))
 	t.Setenv("AUTH_TOKEN_TTL", "not-a-duration")
 	t.Setenv("MAINTENANCE_MODE", "true")
+	t.Setenv("LOGTAP_CLOUD_URL", "")
 	t.Setenv("ENABLE_DEBUG_ENDPOINTS", "true")
 	t.Setenv("DB_REQUIRE_TIMESCALE", "true")
 	t.Setenv("DETECTOR_PLUGIN_DIRS", " /opt/a.so ; /opt/plugins ")
@@ -68,6 +69,9 @@ func TestFromEnv_DefaultsAndToggles(t *testing.T) {
 	if !cfg.MaintenanceMode {
 		t.Fatalf("expected MaintenanceMode=true")
 	}
+	if cfg.MigrationCloudURL != "https://logtap.hivescale.net" {
+		t.Fatalf("expected default MigrationCloudURL, got %q", cfg.MigrationCloudURL)
+	}
 	if !cfg.EnableDebugEndpoints {
 		t.Fatalf("expected EnableDebugEndpoints=true")
 	}
@@ -103,6 +107,21 @@ func TestFromEnv_DefaultsAndToggles(t *testing.T) {
 	}
 	if cfg.CleanupBatchSleep != 0 {
 		t.Fatalf("expected CleanupBatchSleep clamped to 0, got %v", cfg.CleanupBatchSleep)
+	}
+}
+
+func TestFromEnv_MigrationCloudURLOverride(t *testing.T) {
+	t.Setenv("RUN_CONSUMERS", "false")
+	t.Setenv("NSQD_ADDRESS", "127.0.0.1:4150")
+	t.Setenv("AUTH_SECRET", base64.RawStdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("LOGTAP_CLOUD_URL", "http://127.0.0.1:8090/")
+
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatalf("FromEnv: %v", err)
+	}
+	if cfg.MigrationCloudURL != "http://127.0.0.1:8090" {
+		t.Fatalf("expected trimmed override MigrationCloudURL, got %q", cfg.MigrationCloudURL)
 	}
 }
 

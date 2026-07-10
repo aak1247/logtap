@@ -82,6 +82,7 @@ export function AnalyticsPage() {
   const [funnel, setFunnel] = useState<FunnelResponse | null>(null);
   const [funnelBusy, setFunnelBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     if (settings.token) {
@@ -97,19 +98,39 @@ export function AnalyticsPage() {
       try {
         if (!settings.token || !settings.projectId) return;
         setErr("");
+        setNotice("");
+        let metricsUnavailable = false;
+        const tolerateMetrics = async <T,>(promise: Promise<T>, fallback: T): Promise<T> => {
+          try {
+            return await promise;
+          } catch (e) {
+            if (isMetricsUnavailable(e)) {
+              metricsUnavailable = true;
+              return fallback;
+            }
+            throw e;
+          }
+        };
+        const tolerateOptional = async <T,>(promise: Promise<T>, fallback: T): Promise<T> => {
+          try {
+            return await promise;
+          } catch {
+            return fallback;
+          }
+        };
         const [d, m, os, country, region, city, op, ret, top, cp, ug] =
           await Promise.all([
-            getActiveSeries(settings, { bucket: "day" }),
-            getActiveSeries(settings, { bucket: "month" }),
-            getDistribution(settings, { dim: "os", limit: 10 }),
-            getDistribution(settings, { dim: "country", limit: 10 }),
-            getDistribution(settings, { dim: "region", limit: 10 }),
-            getDistribution(settings, { dim: "city", limit: 10 }),
-            getDistribution(settings, { dim: "asn_org", limit: 10 }),
-            getRetention(settings),
-            getTopEvents(settings, { limit: 20 }),
+            tolerateMetrics(getActiveSeries(settings, { bucket: "day" }), emptyActiveSeries(settings.projectId, "day")),
+            tolerateMetrics(getActiveSeries(settings, { bucket: "month" }), emptyActiveSeries(settings.projectId, "month")),
+            tolerateMetrics(getDistribution(settings, { dim: "os", limit: 10 }), emptyDistribution(settings.projectId, "os")),
+            tolerateMetrics(getDistribution(settings, { dim: "country", limit: 10 }), emptyDistribution(settings.projectId, "country")),
+            tolerateMetrics(getDistribution(settings, { dim: "region", limit: 10 }), emptyDistribution(settings.projectId, "region")),
+            tolerateMetrics(getDistribution(settings, { dim: "city", limit: 10 }), emptyDistribution(settings.projectId, "city")),
+            tolerateMetrics(getDistribution(settings, { dim: "asn_org", limit: 10 }), emptyDistribution(settings.projectId, "asn_org")),
+            tolerateMetrics(getRetention(settings), emptyRetention(settings.projectId)),
+            tolerateOptional(getTopEvents(settings, { limit: 20 }), emptyTopEvents(settings.projectId)),
             getCleanupPolicy(settings).catch(() => null),
-            getUserGrowth(settings, buildUserGrowthRange()).catch(() => null),
+            tolerateOptional(getUserGrowth(settings, buildUserGrowthRange()), emptyUserGrowth(settings.projectId)),
           ]);
         if (cancelled) return;
         setDau(d);
@@ -123,6 +144,9 @@ export function AnalyticsPage() {
         setTopEvents(top);
         setCleanupPolicy(cp);
         setUserGrowth(ug);
+        if (metricsUnavailable) {
+          setNotice("部分实时指标未启用，已显示可用的分析数据。");
+        }
       } catch (e) {
         if (cancelled) return;
         setErr(e instanceof Error ? e.message : String(e));
@@ -238,6 +262,11 @@ export function AnalyticsPage() {
             {err}
           </div>
         ) : null}
+        {notice ? (
+          <div className="rounded-xl border border-amber-900/60 bg-amber-950/30 p-4 text-sm text-amber-100">
+            {notice}
+          </div>
+        ) : null}
 
         {tab === "basic" ? (
           <BasicAnalyticsPanel
@@ -299,6 +328,77 @@ function mergeExtensions(
   for (const item of local) map.set(item.id, item);
   for (const item of remote) map.set(item.id, item);
   return Array.from(map.values()).sort((a, b) => a.title.localeCompare(b.title));
+}
+
+function isMetricsUnavailable(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("501") && message.includes("metrics");
+}
+
+function numericProjectID(projectId: string): number {
+  const n = Number(projectId);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function emptyActiveSeries(projectId: string, bucket: "day" | "month"): ActiveSeriesResponse {
+  const { start, end } = bucket === "day" ? buildRangeFromDays(14) : buildMonthRange(6);
+  return {
+    project_id: numericProjectID(projectId),
+    bucket,
+    start,
+    end,
+    series: [],
+  };
+}
+
+function emptyDistribution(projectId: string, dim: string): DistributionResponse {
+  const { start, end } = buildRangeFromDays(7);
+  return {
+    project_id: numericProjectID(projectId),
+    dim,
+    metric: "events",
+    start,
+    end,
+    items: [],
+  };
+}
+
+function emptyRetention(projectId: string): RetentionResponse {
+  const { start, end } = buildRangeFromDays(14);
+  return {
+    project_id: numericProjectID(projectId),
+    start,
+    end,
+    days: [1, 7, 30],
+    rows: [],
+  };
+}
+
+function emptyTopEvents(projectId: string): TopEventsResponse {
+  const { start, end } = buildRangeFromDays(7);
+  return {
+    project_id: numericProjectID(projectId),
+    start,
+    end,
+    items: [],
+  };
+}
+
+function emptyUserGrowth(projectId: string): UserGrowthResponse {
+  const { start, end } = buildUserGrowthRange();
+  return {
+    project_id: numericProjectID(projectId),
+    start,
+    end,
+    series: [],
+    total_users: 0,
+  };
+}
+
+function buildMonthRange(months: number): { start: string; end: string } {
+  const end = new Date();
+  const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - Math.max(0, months - 1), 1));
+  return { start: start.toISOString(), end: end.toISOString() };
 }
 
 type BasicAnalyticsProps = {

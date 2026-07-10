@@ -131,6 +131,26 @@ export type ProjectKey = {
   revoked_at?: string;
 };
 
+export type MigrationPreviewProject = {
+  id: number;
+  name: string;
+  logs: number;
+  events: number;
+};
+
+export type MigrationPreview = {
+  cloud_default_url?: string;
+  projects: MigrationPreviewProject[];
+  total_logs: number;
+  total_events: number;
+};
+
+export type MigrationStartResponse = {
+  job_id: string;
+  status: string;
+  status_url?: string;
+};
+
 export type AlertContact = {
   id: number;
   project_id: number;
@@ -1090,6 +1110,40 @@ export async function listProjects(
   s: ApiSettings,
 ): Promise<{ items: Project[] }> {
   return fetchJSON(`${s.apiBase}/api/projects`, s.token);
+}
+
+export async function previewCloudMigration(
+  s: ApiSettings,
+  req: {
+    project_ids?: number[];
+    since?: string;
+    until?: string;
+  } = {},
+): Promise<MigrationPreview> {
+  return fetchJSON(`${s.apiBase}/api/migration/export/preview`, s.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function startCloudMigration(
+  s: ApiSettings,
+  req: {
+    cloud_api_base?: string;
+    cloud_token: string;
+    org_id?: number;
+    project_ids?: number[];
+    since?: string;
+    until?: string;
+    include_notification_secrets?: boolean;
+  },
+): Promise<MigrationStartResponse> {
+  return fetchJSON(`${s.apiBase}/api/migration/export/cloud`, s.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
 }
 
 export async function createProject(
