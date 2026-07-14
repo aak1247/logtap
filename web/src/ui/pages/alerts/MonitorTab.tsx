@@ -52,8 +52,8 @@ export function MonitorTab(props: { settings: ApiSettings }) {
   const [monitors, setMonitors] = useState<MonitorDefinition[]>([]);
 
   const [form, setForm] = useState<MonitorFormState>(() => createDefaultMonitorForm());
-  const [configMode, setConfigMode] = useState<"form" | "json">("form");
   const [formErrors, setFormErrors] = useState<FieldError[]>([]);
+  const [editorOpen, setEditorOpen] = useState(false);
 
   const [selectedRunsMonitorId, setSelectedRunsMonitorId] = useState(0);
   const [runs, setRuns] = useState<MonitorRun[]>([]);
@@ -164,13 +164,18 @@ export function MonitorTab(props: { settings: ApiSettings }) {
     }
   }
 
-  function startCreate() {
+  function resetCreateForm() {
     setForm((prev) => ({
       ...createDefaultMonitorForm(),
       detectorType: prev.detectorType || sortedDetectors[0]?.type || "",
     }));
     setFormErrors([]);
     setTestResult(null);
+  }
+
+  function startCreate() {
+    resetCreateForm();
+    setEditorOpen(true);
   }
 
   function startEdit(monitor: MonitorDefinition) {
@@ -185,6 +190,12 @@ export function MonitorTab(props: { settings: ApiSettings }) {
     });
     setFormErrors([]);
     setTestResult(null);
+    setEditorOpen(true);
+  }
+
+  function closeEditor() {
+    setEditorOpen(false);
+    setFormErrors([]);
   }
 
   function handleConfigChange(newConfig: Record<string, unknown>) {
@@ -200,7 +211,7 @@ export function MonitorTab(props: { settings: ApiSettings }) {
     const name = form.name.trim();
     if (!name) throw new Error("监控名称不能为空");
     const detectorType = form.detectorType.trim().toLowerCase();
-    if (!detectorType) throw new Error("detectorType 不能为空");
+    if (!detectorType) throw new Error("监控类型不能为空");
     const config = parseConfigObject(form.configJSON);
     const intervalSec = toPositiveInt(form.intervalSec, 60);
     const timeoutMs = toPositiveInt(form.timeoutMs, 5000);
@@ -244,15 +255,20 @@ export function MonitorTab(props: { settings: ApiSettings }) {
       ) : null}
 
       <Panel
-        title="监控插件说明"
+        title="监控说明"
         right={
-          <button
-            className="btn btn-md btn-outline"
-            disabled={loading || Boolean(busy)}
-            onClick={() => void loadBaseData()}
-          >
-            {loading ? "刷新中..." : "刷新"}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn btn-md btn-primary" disabled={loading || Boolean(busy)} onClick={startCreate}>
+              新建监控
+            </button>
+            <button
+              className="btn btn-md btn-outline"
+              disabled={loading || Boolean(busy)}
+              onClick={() => void loadBaseData()}
+            >
+              {loading ? "刷新中..." : "刷新"}
+            </button>
+          </div>
         }
       >
         <div className="text-sm text-zinc-300">
@@ -261,141 +277,111 @@ export function MonitorTab(props: { settings: ApiSettings }) {
         </div>
       </Panel>
 
-      <Panel
-        title={form.monitorId > 0 ? `编辑监控 #${form.monitorId}` : "新建监控"}
-        right={
-          <button className="btn btn-md btn-outline" disabled={Boolean(busy)} onClick={startCreate}>
-            清空
-          </button>
-        }
-      >
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-            <InputField label="名称" value={form.name} onChange={(v) => setForm((prev) => ({ ...prev, name: v }))} placeholder="api-health-check" />
-            <SelectField
-              label="Detector"
-              value={form.detectorType}
-              onChange={(v) => setForm((prev) => ({ ...prev, detectorType: v }))}
-              options={sortedDetectors.map((d) => ({ value: d.type, label: d.type }))}
-            />
-            <InputField
-              label="intervalSec"
-              value={form.intervalSec}
-              onChange={(v) => setForm((prev) => ({ ...prev, intervalSec: v }))}
-              placeholder="60"
-            />
-            <InputField
-              label="timeoutMs"
-              value={form.timeoutMs}
-              onChange={(v) => setForm((prev) => ({ ...prev, timeoutMs: v }))}
-              placeholder="5000"
-            />
-            <ToggleField
-              label="启用"
-              checked={form.enabled}
-              onChange={(v) => setForm((prev) => ({ ...prev, enabled: v }))}
-            />
-          </div>
-
-          {/* Config Section with Mode Toggle */}
-          <div className="rounded-lg border border-zinc-900 bg-zinc-950/40 p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="text-xs text-zinc-400">
-                插件配置
-                {schemaLoading ? "（加载中）" : ""}
-              </div>
-              <div className="flex gap-1 rounded-md border border-zinc-800 bg-zinc-950 p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setConfigMode("form")}
-                  className={`rounded px-2 py-1 text-xs ${
-                    configMode === "form"
-                      ? "bg-indigo-600 text-white"
-                      : "text-zinc-400 hover:text-zinc-200"
-                  }`}
-                >
-                  表单模式
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfigMode("json")}
-                  className={`rounded px-2 py-1 text-xs ${
-                    configMode === "json"
-                      ? "bg-indigo-600 text-white"
-                      : "text-zinc-400 hover:text-zinc-200"
-                  }`}
-                >
-                  JSON模式
-                </button>
-              </div>
-            </div>
-
-            {configMode === "form" ? (
-              typedSchema ? (
-                <SchemaForm
-                  schema={typedSchema}
-                  value={configObject}
-                  onChange={handleConfigChange}
-                  errors={formErrors}
-                  disabled={Boolean(busy)}
-                />
-              ) : (
-                <div className="py-4 text-center text-sm text-zinc-500">
-                  {schemaLoading ? "正在加载表单配置..." : "请先选择检测器类型"}
+      {editorOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-8">
+          <div
+            className="max-h-[calc(100vh-4rem)] w-full max-w-4xl overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 shadow-xl shadow-black/40"
+            role="dialog"
+            aria-modal="true"
+            aria-label={form.monitorId > 0 ? `编辑监控 #${form.monitorId}` : "新建监控"}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-zinc-900 px-5 py-4">
+              <div>
+                <div className="text-base font-semibold">
+                  {form.monitorId > 0 ? `编辑监控 #${form.monitorId}` : "新建监控"}
                 </div>
-              )
-            ) : (
-              <JsonField
-                label=""
-                value={form.configJSON}
-                onChange={(v) => {
-                  setForm((prev) => ({ ...prev, configJSON: v }));
-                  setFormErrors([]);
-                }}
-                rows={10}
-              />
-            )}
-          </div>
-
-          {/* Schema Reference (collapsible) */}
-          <details className="rounded-lg border border-zinc-900 bg-zinc-950/40">
-            <summary className="cursor-pointer px-3 py-2 text-xs text-zinc-400 hover:text-zinc-300">
-              Detector Schema 参考
-            </summary>
-            <div className="border-t border-zinc-900 p-3">
-              <pre className="max-h-64 overflow-auto rounded-md border border-zinc-900 bg-zinc-950 p-3 font-mono text-xs text-zinc-300">
-                {stringifyJSON(currentSchema ?? {})}
-              </pre>
-            </div>
-          </details>
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="btn btn-md btn-primary"
-              disabled={Boolean(busy)}
-              onClick={() =>
-                void runAction(form.monitorId > 0 ? "监控已更新" : "监控已创建", async () => {
-                  await saveMonitor();
-                  if (form.monitorId === 0) startCreate();
-                })
-              }
-            >
-              {form.monitorId > 0 ? "保存修改" : "创建监控"}
-            </button>
-            {form.monitorId > 0 ? (
-              <button
-                className="btn btn-md btn-outline"
-                disabled={Boolean(busy)}
-                onClick={() => void runAction("配置已重置", async () => startCreate(), false)}
-              >
-                取消编辑
+                <div className="mt-1 text-xs text-zinc-500">
+                  选择监控类型，填写检查配置和调度参数。
+                </div>
+              </div>
+              <button className="btn btn-sm btn-outline" disabled={Boolean(busy)} onClick={closeEditor}>
+                关闭
               </button>
-            ) : null}
+            </div>
+
+            <div className="space-y-4 px-5 py-4">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+                <InputField label="名称" value={form.name} onChange={(v) => setForm((prev) => ({ ...prev, name: v }))} placeholder="api-health-check" />
+                <SelectField
+                  label="监控类型"
+                  value={form.detectorType}
+                  onChange={(v) => setForm((prev) => ({ ...prev, detectorType: v }))}
+                  options={sortedDetectors.map((d) => ({ value: d.type, label: d.type }))}
+                />
+                <InputField
+                  label="intervalSec"
+                  value={form.intervalSec}
+                  onChange={(v) => setForm((prev) => ({ ...prev, intervalSec: v }))}
+                  placeholder="60"
+                />
+                <InputField
+                  label="timeoutMs"
+                  value={form.timeoutMs}
+                  onChange={(v) => setForm((prev) => ({ ...prev, timeoutMs: v }))}
+                  placeholder="5000"
+                />
+                <ToggleField
+                  label="启用"
+                  checked={form.enabled}
+                  onChange={(v) => setForm((prev) => ({ ...prev, enabled: v }))}
+                />
+              </div>
+
+              <div className="rounded-lg border border-zinc-900 bg-zinc-950/40 p-4">
+                <div className="mb-3 text-xs text-zinc-400">
+                  检查配置
+                  {schemaLoading ? "（加载中）" : ""}
+                </div>
+
+                {typedSchema ? (
+                  <SchemaForm
+                    schema={typedSchema}
+                    value={configObject}
+                    onChange={handleConfigChange}
+                    errors={formErrors}
+                    disabled={Boolean(busy)}
+                  />
+                ) : (
+                  <div className="py-4 text-center text-sm text-zinc-500">
+                    {schemaLoading ? "正在加载表单配置..." : "请先选择监控类型"}
+                  </div>
+                )}
+              </div>
+
+              <details className="rounded-lg border border-zinc-900 bg-zinc-950/40">
+                <summary className="cursor-pointer px-3 py-2 text-xs text-zinc-400 hover:text-zinc-300">
+                  配置 Schema 参考
+                </summary>
+                <div className="border-t border-zinc-900 p-3">
+                  <pre className="max-h-64 overflow-auto rounded-md border border-zinc-900 bg-zinc-950 p-3 font-mono text-xs text-zinc-300">
+                    {stringifyJSON(currentSchema ?? {})}
+                  </pre>
+                </div>
+              </details>
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-900 px-5 py-4">
+              <button className="btn btn-md btn-outline" disabled={Boolean(busy)} onClick={closeEditor}>
+                取消
+              </button>
+              <button
+                className="btn btn-md btn-primary"
+                disabled={Boolean(busy)}
+                onClick={() =>
+                  void runAction(form.monitorId > 0 ? "监控已更新" : "监控已创建", async () => {
+                    await saveMonitor();
+                    closeEditor();
+                  })
+                }
+              >
+                {form.monitorId > 0 ? "保存修改" : "创建监控"}
+              </button>
+            </div>
           </div>
         </div>
-      </Panel>
+      ) : null}
 
-      <Panel title={`Detector 列表（${sortedDetectors.length}）`}>
+      <Panel title={`检查类型（Detector）列表（${sortedDetectors.length}）`}>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="text-zinc-500">
@@ -507,7 +493,8 @@ export function MonitorTab(props: { settings: ApiSettings }) {
                               setTestResult(null);
                             }
                             if (form.monitorId === m.id) {
-                              startCreate();
+                              closeEditor();
+                              resetCreateForm();
                             }
                           });
                         }}
@@ -586,7 +573,8 @@ export function MonitorTab(props: { settings: ApiSettings }) {
                   <th className="py-2 pr-3">开始</th>
                   <th className="py-2 pr-3">结束</th>
                   <th className="py-2 pr-3">signalCount</th>
-                  <th className="py-2 pr-0">error</th>
+                  <th className="py-2 pr-3">信号摘要</th>
+                  <th className="py-2 pr-0">执行错误</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-900">
@@ -597,6 +585,7 @@ export function MonitorTab(props: { settings: ApiSettings }) {
                     <td className="py-2 pr-3 text-zinc-400">{toLocalTime(r.started_at)}</td>
                     <td className="py-2 pr-3 text-zinc-400">{toLocalTime(r.finished_at)}</td>
                     <td className="py-2 pr-3">{r.signal_count}</td>
+                    <td className="py-2 pr-3 text-zinc-300">{runSignalSummary(r)}</td>
                     <td className="py-2 pr-0 text-red-300">{r.error || "-"}</td>
                   </tr>
                 ))}
@@ -614,6 +603,19 @@ export function MonitorTab(props: { settings: ApiSettings }) {
       ) : null}
     </div>
   );
+}
+
+function runSignalSummary(run: MonitorRun): string {
+  const raw = run.result?.signalSamples;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return run.signal_count > 0 ? `${run.signal_count} signals` : "-";
+  }
+  const first = raw[0] as Record<string, unknown>;
+  const severity = typeof first.severity === "string" ? first.severity : "";
+  const status = typeof first.status === "string" ? first.status : "";
+  const message = typeof first.message === "string" ? first.message : "";
+  const error = typeof first.error === "string" ? first.error : "";
+  return [severity, status, error || message].filter(Boolean).join(" / ") || `${run.signal_count} signals`;
 }
 
 function InputField(props: {
@@ -670,21 +672,6 @@ function ToggleField(props: { label: string; checked: boolean; onChange: (v: boo
         onChange={(e) => props.onChange(e.target.checked)}
       />
     </label>
-  );
-}
-
-function JsonField(props: { label: string; value: string; onChange: (v: string) => void; rows?: number }) {
-  return (
-    <div>
-      {props.label && <div className="text-xs text-zinc-400">{props.label}</div>}
-      <textarea
-        value={props.value}
-        onChange={(e) => props.onChange(e.target.value)}
-        rows={props.rows ?? 8}
-        spellCheck={false}
-        className={`${props.label ? "mt-1" : ""} w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-100 outline-none focus:border-indigo-500`}
-      />
-    </div>
   );
 }
 

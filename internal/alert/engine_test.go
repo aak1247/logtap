@@ -112,7 +112,19 @@ func TestEngine_ThresholdAndBackoff(t *testing.T) {
 	}
 }
 
-func TestEngine_WindowExpiryResetsBackoff(t *testing.T) {
+func TestComputeBackoffDelay_CustomMultiplierAndDefaultMax(t *testing.T) {
+	t.Parallel()
+
+	rep := RuleRepeat{BaseBackoffSec: 300, BackoffMultiplier: 3}
+	if got := computeBackoffDelay(rep, 1); got != 15*time.Minute {
+		t.Fatalf("expected 15m delay, got %s", got)
+	}
+	if got := computeBackoffDelay(rep, 10); got != 7*24*time.Hour {
+		t.Fatalf("expected 7d max delay, got %s", got)
+	}
+}
+
+func TestEngine_WindowExpiryDoesNotBypassActiveBackoff(t *testing.T) {
 	t.Parallel()
 
 	db := openAlertTestDB(t)
@@ -127,7 +139,7 @@ func TestEngine_WindowExpiryResetsBackoff(t *testing.T) {
 	repeat, _ := json.Marshal(RuleRepeat{
 		WindowSec:       60,
 		Threshold:       1,
-		BaseBackoffSec:  3600,
+		BaseBackoffSec:  300,
 		MaxBackoffSec:   3600,
 		DedupeByMessage: &dedupeByMessage,
 	})
@@ -155,7 +167,7 @@ func TestEngine_WindowExpiryResetsBackoff(t *testing.T) {
 		t.Fatalf("Evaluate #1: %v", err)
 	}
 
-	now = now.Add(61 * time.Second) // window expired but backoff would still be active unless reset.
+	now = now.Add(61 * time.Second)
 	in.Timestamp = now
 	if err := e.Evaluate(context.Background(), in); err != nil {
 		t.Fatalf("Evaluate #2: %v", err)
@@ -165,8 +177,25 @@ func TestEngine_WindowExpiryResetsBackoff(t *testing.T) {
 	if err := db.Model(&model.AlertDelivery{}).Count(&count).Error; err != nil {
 		t.Fatalf("count deliveries: %v", err)
 	}
-	if count != 2 {
-		t.Fatalf("expected 2 deliveries after window expiry, got %d", count)
+	if count != 1 {
+		t.Fatalf("expected still 1 delivery during active backoff, got %d", count)
+	}
+
+	now = now.Add(3600 * time.Second)
+	in.Timestamp = now
+	if err := e.Evaluate(context.Background(), in); err != nil {
+		t.Fatalf("Evaluate #3: %v", err)
+	}
+
+	var state model.AlertState
+	if err := db.First(&state, "rule_id = ?", rule.ID).Error; err != nil {
+		t.Fatalf("find state: %v", err)
+	}
+	if state.BackoffExp != 2 {
+		t.Fatalf("expected backoff exponent to continue at 2, got %d", state.BackoffExp)
+	}
+	if want := now.Add(600 * time.Second); !state.NextAllowedAt.Equal(want) {
+		t.Fatalf("expected next_allowed_at %s, got %s", want, state.NextAllowedAt)
 	}
 }
 

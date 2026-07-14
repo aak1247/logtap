@@ -82,6 +82,12 @@ func AutoMigrate(ctx context.Context, db *gorm.DB, opts Options) error {
 		return err
 	}
 
+	if strings.EqualFold(db.Dialector.Name(), "postgres") {
+		if err := ensureAlertStateUniqueIndex(gdb); err != nil {
+			return err
+		}
+	}
+
 	if err := backfillUserFirstSeenIfEmpty(gdb); err != nil {
 		return err
 	}
@@ -105,6 +111,67 @@ func AutoMigrate(ctx context.Context, db *gorm.DB, opts Options) error {
 	}
 
 	return nil
+}
+
+func ensureAlertStateUniqueIndex(db *gorm.DB) error {
+	if db == nil {
+		return gorm.ErrInvalidDB
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`
+			WITH keep AS (
+				SELECT
+					rule_id,
+					key_hash,
+					min(id) AS keep_id,
+					max(occurrences) AS occurrences,
+					max(backoff_exp) AS backoff_exp,
+					max(last_seen_at) AS last_seen_at,
+					max(last_sent_at) AS last_sent_at,
+					max(next_allowed_at) AS next_allowed_at,
+					min(created_at) AS created_at,
+					max(updated_at) AS updated_at
+				FROM alert_states
+				GROUP BY rule_id, key_hash
+				HAVING count(*) > 1
+			)
+			UPDATE alert_states AS s
+			SET
+				occurrences = keep.occurrences,
+				backoff_exp = keep.backoff_exp,
+				last_seen_at = keep.last_seen_at,
+				last_sent_at = keep.last_sent_at,
+				next_allowed_at = keep.next_allowed_at,
+				created_at = keep.created_at,
+				updated_at = keep.updated_at
+			FROM keep
+			WHERE s.id = keep.keep_id
+		`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+			WITH keep AS (
+				SELECT rule_id, key_hash, min(id) AS keep_id
+				FROM alert_states
+				GROUP BY rule_id, key_hash
+				HAVING count(*) > 1
+			)
+			DELETE FROM alert_states AS s
+			USING keep
+			WHERE s.rule_id = keep.rule_id
+				AND s.key_hash = keep.key_hash
+				AND s.id <> keep.keep_id
+		`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`DROP INDEX IF EXISTS idx_alert_states_rule_key`).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_states_rule_key
+			ON alert_states (rule_id, key_hash)
+		`).Error
+	})
 }
 
 func ensureTimescaleExtension(db *gorm.DB, require bool) (bool, error) {

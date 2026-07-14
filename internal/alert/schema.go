@@ -36,12 +36,13 @@ type RuleMatch struct {
 
 // RuleRepeat describes dedupe/backoff behavior.
 type RuleRepeat struct {
-	WindowSec       int      `json:"windowSec,omitempty"`       // rolling window to count repeats
-	Threshold       int      `json:"threshold,omitempty"`       // only alert once repeats >= threshold
-	BaseBackoffSec  int      `json:"baseBackoffSec,omitempty"`  // initial backoff after alert
-	MaxBackoffSec   int      `json:"maxBackoffSec,omitempty"`   // cap
-	DedupeByMessage *bool    `json:"dedupeByMessage,omitempty"` // default true when omitted
-	DedupeFields    []string `json:"dedupeFields,omitempty"`    // JSON paths to include in dedupe key
+	WindowSec         int      `json:"windowSec,omitempty"`         // rolling window to count repeats
+	Threshold         int      `json:"threshold,omitempty"`         // only alert once repeats >= threshold
+	BaseBackoffSec    int      `json:"baseBackoffSec,omitempty"`    // initial backoff after alert
+	BackoffMultiplier float64  `json:"backoffMultiplier,omitempty"` // exponential multiplier, default 2
+	MaxBackoffSec     int      `json:"maxBackoffSec,omitempty"`     // cap
+	DedupeByMessage   *bool    `json:"dedupeByMessage,omitempty"`   // default true when omitted
+	DedupeFields      []string `json:"dedupeFields,omitempty"`      // JSON paths to include in dedupe key
 }
 
 type RuleTargets struct {

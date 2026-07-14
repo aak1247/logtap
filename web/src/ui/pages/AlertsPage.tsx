@@ -17,7 +17,7 @@ import {
   listAlertRules,
   listAlertWebhookEndpoints,
   listAlertWecomBots,
-  listChannels,
+  listMonitors,
   testAlertRules,
   testAlertRuleDeliveries,
   updateAlertContact,
@@ -33,15 +33,12 @@ import {
   type AlertRuleSource,
   type AlertWebhookEndpoint,
   type AlertWecomBot,
-  type ChannelDescriptor,
+  type MonitorDefinition,
 } from "../../lib/api";
-import { SchemaForm } from "../components/schema-form/SchemaForm";
-import type { JsonSchema } from "../components/schema-form/types";
 import { loadSettings, subscribeSettingsChange } from "../../lib/storage";
 import { Panel } from "../components/Panel";
-import { MonitorTab } from "./alerts/MonitorTab";
 
-type AlertsTab = "contacts" | "groups" | "channels" | "rules" | "test" | "deliveries" | "monitors";
+type AlertsTab = "contacts" | "groups" | "channels" | "monitorRules" | "rules" | "test" | "deliveries";
 
 const tabClass =
   "px-3 py-2 rounded-lg text-sm text-zinc-300 transition-colors hover:text-zinc-100 hover:bg-zinc-900";
@@ -67,6 +64,7 @@ type RuleFormState = {
   windowSec: string;
   threshold: string;
   baseBackoffSec: string;
+  backoffMultiplier: string;
   maxBackoffSec: string;
   dedupeByMessage: boolean;
   dedupeFields: string;
@@ -77,6 +75,20 @@ type RuleFormState = {
   wecomBotIds: number[];
   webhookEndpointIds: number[];
   pluginChannels: { type: string; config: Record<string, unknown> }[];
+};
+
+type MonitorRuleFormState = {
+  monitorId: string;
+  level: "error" | "warn";
+  baseBackoffSec: string;
+  backoffMultiplier: string;
+  maxBackoffSec: string;
+  wecomBotIds: number[];
+  webhookEndpointIds: number[];
+  emailGroupIds: number[];
+  emailContactIds: number[];
+  smsGroupIds: number[];
+  smsContactIds: number[];
 };
 
 function createDefaultRuleForm(): RuleFormState {
@@ -91,7 +103,8 @@ function createDefaultRuleForm(): RuleFormState {
     windowSec: "60",
     threshold: "1",
     baseBackoffSec: "60",
-    maxBackoffSec: "3600",
+    backoffMultiplier: "2",
+    maxBackoffSec: "604800",
     dedupeByMessage: true,
     dedupeFields: "",
     emailGroupIds: [],
@@ -101,6 +114,25 @@ function createDefaultRuleForm(): RuleFormState {
     wecomBotIds: [],
     webhookEndpointIds: [],
     pluginChannels: [],
+  };
+}
+
+function createDefaultMonitorRuleForm(
+  monitors: MonitorDefinition[] = [],
+  wecomBots: AlertWecomBot[] = [],
+): MonitorRuleFormState {
+  return {
+    monitorId: String(monitors[0]?.id || ""),
+    level: "error",
+    baseBackoffSec: "300",
+    backoffMultiplier: "2",
+    maxBackoffSec: "604800",
+    wecomBotIds: wecomBots[0] ? [wecomBots[0].id] : [],
+    webhookEndpointIds: [],
+    emailGroupIds: [],
+    emailContactIds: [],
+    smsGroupIds: [],
+    smsContactIds: [],
   };
 }
 
@@ -120,8 +152,8 @@ export function AlertsPage() {
   const [webhookEndpoints, setWebhookEndpoints] = useState<AlertWebhookEndpoint[]>([]);
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [deliveries, setDeliveries] = useState<AlertDelivery[]>([]);
-  const [channelTypes, setChannelTypes] = useState<ChannelDescriptor[]>([]);
   const [rulePreviewItems, setRulePreviewItems] = useState<AlertRulePreview[]>([]);
+  const [monitors, setMonitors] = useState<MonitorDefinition[]>([]);
 
   const [newContactType, setNewContactType] = useState<"email" | "sms">("email");
   const [newContactName, setNewContactName] = useState("");
@@ -152,6 +184,7 @@ export function AlertsPage() {
   const [newRuleForm, setNewRuleForm] = useState<RuleFormState>(() => createDefaultRuleForm());
   const [editRuleId, setEditRuleId] = useState(0);
   const [editRuleForm, setEditRuleForm] = useState<RuleFormState>(() => createDefaultRuleForm());
+  const [monitorRuleForm, setMonitorRuleForm] = useState<MonitorRuleFormState>(() => createDefaultMonitorRuleForm());
 
   const [testSource, setTestSource] = useState<AlertRuleSource>("logs");
   const [testLevel, setTestLevel] = useState("error");
@@ -203,7 +236,7 @@ export function AlertsPage() {
     try {
       setLoading(true);
       setErr("");
-      const [contactsRes, groupsRes, botsRes, endpointsRes, rulesRes, deliveriesRes, channelsRes] =
+      const [contactsRes, groupsRes, botsRes, endpointsRes, rulesRes, deliveriesRes, monitorsRes] =
         await Promise.all([
           listAlertContacts(settings),
           listAlertContactGroups(settings),
@@ -211,7 +244,7 @@ export function AlertsPage() {
           listAlertWebhookEndpoints(settings),
           listAlertRules(settings),
           listAlertDeliveries(settings, { limit: parseLimit(filterLimit) }),
-          listChannels(settings).catch(() => ({ items: [] })),
+          listMonitors(settings),
         ]);
       setContacts(contactsRes.items);
       setGroups(groupsRes.items);
@@ -219,7 +252,12 @@ export function AlertsPage() {
       setWebhookEndpoints(endpointsRes.items);
       setRules(rulesRes.items);
       setDeliveries(deliveriesRes.items);
-      setChannelTypes(channelsRes.items || []);
+      setMonitors(monitorsRes.items || []);
+      setMonitorRuleForm((prev) => ({
+        ...prev,
+        monitorId: prev.monitorId || String(monitorsRes.items?.[0]?.id || ""),
+        wecomBotIds: prev.wecomBotIds.length > 0 ? prev.wecomBotIds : botsRes.items?.[0] ? [botsRes.items[0].id] : [],
+      }));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -325,10 +363,10 @@ export function AlertsPage() {
           <TabButton active={activeTab === "contacts"} onClick={() => setActiveTab("contacts")}>联系人</TabButton>
           <TabButton active={activeTab === "groups"} onClick={() => setActiveTab("groups")}>联系人组</TabButton>
           <TabButton active={activeTab === "channels"} onClick={() => setActiveTab("channels")}>通知渠道</TabButton>
+          <TabButton active={activeTab === "monitorRules"} onClick={() => setActiveTab("monitorRules")}>监控告警</TabButton>
           <TabButton active={activeTab === "rules"} onClick={() => setActiveTab("rules")}>规则</TabButton>
           <TabButton active={activeTab === "test"} onClick={() => setActiveTab("test")}>规则测试</TabButton>
           <TabButton active={activeTab === "deliveries"} onClick={() => setActiveTab("deliveries")}>投递记录</TabButton>
-          <TabButton active={activeTab === "monitors"} onClick={() => setActiveTab("monitors")}>监控插件</TabButton>
         </div>
       </Panel>
 
@@ -907,36 +945,78 @@ export function AlertsPage() {
         </div>
       ) : null}
 
-      {/* Plugin Channels Info */}
-      {activeTab === "channels" && channelTypes.length > 0 ? (
-        <Panel title="插件通知渠道">
-          <div className="text-xs text-zinc-400 mb-3">以下渠道通过插件注册，可在告警规则中使用。</div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="text-zinc-500">
-                <tr>
-                  <th className="py-2 pr-4">类型</th>
-                  <th className="py-2 pr-4">配置 Schema</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-900">
-                {channelTypes.map((ch) => (
-                  <tr key={ch.type} className="hover:bg-zinc-900/40">
-                    <td className="py-2 pr-4 font-mono text-zinc-100">{ch.type}</td>
-                    <td className="py-2 pr-4">
-                      <details>
-                        <summary className="cursor-pointer text-xs text-zinc-400 hover:text-zinc-200">查看 Schema</summary>
-                        <pre className="mt-1 max-h-48 overflow-auto rounded bg-zinc-900 p-2 text-[10px] text-zinc-300">
-                          {JSON.stringify(ch.schema, null, 2)}
-                        </pre>
-                      </details>
-                    </td>
+      {activeTab === "monitorRules" ? (
+        <div className="space-y-4">
+          <Panel title="新建监控告警">
+            <MonitorRuleEditor
+              form={monitorRuleForm}
+              onChange={setMonitorRuleForm}
+              monitors={monitors}
+              contactsByType={contactsByType}
+              groupsByType={groupsByType}
+              wecomBots={wecomBots}
+              webhookEndpoints={webhookEndpoints}
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                className="btn btn-md btn-outline"
+                disabled={Boolean(busy)}
+                onClick={() => setMonitorRuleForm(createDefaultMonitorRuleForm(monitors, wecomBots))}
+              >
+                重置
+              </button>
+              <button
+                className="btn btn-md btn-primary"
+                disabled={Boolean(busy)}
+                onClick={() =>
+                  void runMutation("监控告警规则已创建", async () => {
+                    await createAlertRule(settings, buildMonitorRulePayload(monitorRuleForm, monitors));
+                  })
+                }
+              >
+                创建告警规则
+              </button>
+            </div>
+          </Panel>
+
+          <Panel title="已配置规则">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="text-zinc-500">
+                  <tr>
+                    <th className="py-2 pr-4">ID</th>
+                    <th className="py-2 pr-4">名称</th>
+                    <th className="py-2 pr-4">监控项</th>
+                    <th className="py-2 pr-4">级别</th>
+                    <th className="py-2 pr-4">通知</th>
+                    <th className="py-2 pr-0">状态</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
+                </thead>
+                <tbody className="divide-y divide-zinc-900">
+                  {rules.filter(isMonitorRule).map((r) => (
+                    <tr key={r.id} className="hover:bg-zinc-900/40">
+                      <td className="py-2 pr-4 font-mono text-zinc-400">#{r.id}</td>
+                      <td className="py-2 pr-4 text-zinc-100">{r.name}</td>
+                      <td className="py-2 pr-4 text-zinc-300">{monitorLabelFromRule(r, monitors)}</td>
+                      <td className="py-2 pr-4 font-mono text-zinc-300">{ruleLevels(r).join(", ") || "-"}</td>
+                      <td className="py-2 pr-4 text-zinc-300">{formatTargetsSummary(r.targets)}</td>
+                      <td className="py-2 pr-0">
+                        <StatusPill ok={r.enabled} okText="enabled" noText="disabled" />
+                      </td>
+                    </tr>
+                  ))}
+                  {rules.filter(isMonitorRule).length === 0 ? (
+                    <tr>
+                      <td className="py-6 text-sm text-zinc-500" colSpan={6}>
+                        暂无监控告警规则
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        </div>
       ) : null}
 
       {activeTab === "rules" ? (
@@ -949,7 +1029,6 @@ export function AlertsPage() {
               groupsByType={groupsByType}
               wecomBots={wecomBots}
               webhookEndpoints={webhookEndpoints}
-              channelTypes={channelTypes}
             />
             <div className="mt-3 flex justify-end gap-2">
               <button
@@ -1044,7 +1123,6 @@ export function AlertsPage() {
                               groupsByType={groupsByType}
                               wecomBots={wecomBots}
                               webhookEndpoints={webhookEndpoints}
-                              channelTypes={channelTypes}
                             />
                             <div className="mt-3 flex justify-end gap-2">
                               <button className="btn btn-xs btn-outline" onClick={() => setEditRuleId(0)}>
@@ -1283,9 +1361,6 @@ export function AlertsPage() {
         </div>
       ) : null}
 
-      {activeTab === "monitors" ? (
-        <MonitorTab settings={settings} />
-      ) : null}
     </div>
   );
 }
@@ -1373,6 +1448,123 @@ function JsonField(props: { label: string; value: string; onChange: (v: string) 
   );
 }
 
+function MonitorRuleEditor(props: {
+  form: MonitorRuleFormState;
+  onChange: (next: MonitorRuleFormState) => void;
+  monitors: MonitorDefinition[];
+  contactsByType: { email: AlertContact[]; sms: AlertContact[] };
+  groupsByType: { email: AlertContactGroupWithMembers[]; sms: AlertContactGroupWithMembers[] };
+  wecomBots: AlertWecomBot[];
+  webhookEndpoints: AlertWebhookEndpoint[];
+}) {
+  const f = props.form;
+  const set = (patch: Partial<MonitorRuleFormState>) => props.onChange({ ...f, ...patch });
+  const monitorOptions = props.monitors.map((m) => ({
+    value: String(m.id),
+    label: `#${m.id} ${m.name} (${m.detector_type})`,
+  }));
+  const emailContactOptions = props.contactsByType.email.map((c) => ({
+    id: c.id,
+    label: `#${c.id} ${c.name || c.value}`,
+  }));
+  const smsContactOptions = props.contactsByType.sms.map((c) => ({
+    id: c.id,
+    label: `#${c.id} ${c.name || c.value}`,
+  }));
+  const emailGroupOptions = props.groupsByType.email.map((g) => ({
+    id: g.id,
+    label: `#${g.id} ${g.name}`,
+  }));
+  const smsGroupOptions = props.groupsByType.sms.map((g) => ({
+    id: g.id,
+    label: `#${g.id} ${g.name}`,
+  }));
+  const wecomOptions = props.wecomBots.map((b) => ({ id: b.id, label: `#${b.id} ${b.name}` }));
+  const webhookOptions = props.webhookEndpoints.map((ep) => ({ id: ep.id, label: `#${ep.id} ${ep.name}` }));
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+        <SelectField
+          label="监控项"
+          value={f.monitorId}
+          onChange={(v) => set({ monitorId: v })}
+          options={monitorOptions}
+        />
+        <SelectField
+          label="触发级别"
+          value={f.level}
+          onChange={(v) => set({ level: v === "warn" ? "warn" : "error" })}
+          options={[
+            { label: "error", value: "error" },
+            { label: "warn 及以上", value: "warn" },
+          ]}
+        />
+        <InputField
+          label="重复提醒间隔（秒）"
+          value={f.baseBackoffSec}
+          onChange={(v) => set({ baseBackoffSec: v })}
+          placeholder="300"
+        />
+        <InputField
+          label="指数倍数"
+          value={f.backoffMultiplier}
+          onChange={(v) => set({ backoffMultiplier: v })}
+          placeholder="2"
+        />
+        <InputField
+          label="最大退避（秒）"
+          value={f.maxBackoffSec}
+          onChange={(v) => set({ maxBackoffSec: v })}
+          placeholder="604800"
+        />
+      </div>
+
+      <div className="rounded-lg bg-zinc-950/40 p-3">
+        <div className="mb-2 text-sm font-semibold text-zinc-100">通知目标</div>
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <IdMultiSelect
+            label="WeCom Bots"
+            items={wecomOptions}
+            selected={f.wecomBotIds}
+            onChange={(ids) => set({ wecomBotIds: ids })}
+          />
+          <IdMultiSelect
+            label="Webhook Endpoints"
+            items={webhookOptions}
+            selected={f.webhookEndpointIds}
+            onChange={(ids) => set({ webhookEndpointIds: ids })}
+          />
+          <IdMultiSelect
+            label="Email Groups"
+            items={emailGroupOptions}
+            selected={f.emailGroupIds}
+            onChange={(ids) => set({ emailGroupIds: ids })}
+          />
+          <IdMultiSelect
+            label="Email Contacts"
+            items={emailContactOptions}
+            selected={f.emailContactIds}
+            onChange={(ids) => set({ emailContactIds: ids })}
+          />
+          <IdMultiSelect
+            label="SMS Groups"
+            items={smsGroupOptions}
+            selected={f.smsGroupIds}
+            onChange={(ids) => set({ smsGroupIds: ids })}
+          />
+          <IdMultiSelect
+            label="SMS Contacts"
+            items={smsContactOptions}
+            selected={f.smsContactIds}
+            onChange={(ids) => set({ smsContactIds: ids })}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RuleFormEditor(props: {
   form: RuleFormState;
   onChange: (next: RuleFormState) => void;
@@ -1380,7 +1572,6 @@ function RuleFormEditor(props: {
   groupsByType: { email: AlertContactGroupWithMembers[]; sms: AlertContactGroupWithMembers[] };
   wecomBots: AlertWecomBot[];
   webhookEndpoints: AlertWebhookEndpoint[];
-  channelTypes: ChannelDescriptor[];
 }) {
   const f = props.form;
   const set = (patch: Partial<RuleFormState>) => props.onChange({ ...f, ...patch });
@@ -1527,7 +1718,7 @@ function RuleFormEditor(props: {
 
       <div className="rounded-lg border border-zinc-900 bg-zinc-950/40 p-3">
         <div className="mb-2 text-sm font-semibold text-zinc-100">去重与退避</div>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
           <InputField label="windowSec" value={f.windowSec} onChange={(v) => set({ windowSec: v })} placeholder="60" />
           <InputField label="threshold" value={f.threshold} onChange={(v) => set({ threshold: v })} placeholder="1" />
           <InputField
@@ -1537,10 +1728,16 @@ function RuleFormEditor(props: {
             placeholder="60"
           />
           <InputField
+            label="backoffMultiplier"
+            value={f.backoffMultiplier}
+            onChange={(v) => set({ backoffMultiplier: v })}
+            placeholder="2"
+          />
+          <InputField
             label="maxBackoffSec"
             value={f.maxBackoffSec}
             onChange={(v) => set({ maxBackoffSec: v })}
-            placeholder="3600"
+            placeholder="604800"
           />
         </div>
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -1598,51 +1795,6 @@ function RuleFormEditor(props: {
             onChange={(ids) => set({ webhookEndpointIds: ids })}
           />
         </div>
-        {props.channelTypes.length > 0 && (
-          <div className="mt-4 border-t border-zinc-800 pt-3">
-            <div className="mb-2 text-sm font-semibold text-zinc-100">插件渠道</div>
-            <div className="space-y-3">
-              {props.channelTypes.map((ch) => {
-                const existing = f.pluginChannels.find((c) => c.type === ch.type);
-                const enabled = !!existing;
-                return (
-                  <div key={ch.type} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-mono text-zinc-200">{ch.type}</span>
-                      <button
-                        className={`text-xs px-2 py-1 rounded ${enabled ? 'bg-red-950/50 text-red-300 hover:bg-red-950' : 'bg-emerald-950/50 text-emerald-300 hover:bg-emerald-950'}`}
-                        onClick={() => {
-                          if (enabled) {
-                            set({ pluginChannels: f.pluginChannels.filter((c) => c.type !== ch.type) });
-                          } else {
-                            set({ pluginChannels: [...f.pluginChannels, { type: ch.type, config: {} }] });
-                          }
-                        }}
-                      >
-                        {enabled ? '移除' : '启用'}
-                      </button>
-                    </div>
-                    {enabled && ch.schema && typeof ch.schema === 'object' ? (
-                      <div className="mt-2">
-                        <SchemaForm
-                          schema={ch.schema as JsonSchema}
-                          value={existing?.config || {}}
-                          onChange={(config) => {
-                            set({
-                              pluginChannels: f.pluginChannels.map((c) =>
-                                c.type === ch.type ? { ...c, config } : c,
-                              ),
-                            });
-                          }}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -1788,10 +1940,12 @@ function buildRulePayloadFromForm(form: RuleFormState): {
   const windowSec = parseIntOrZero(form.windowSec);
   const threshold = parseIntOrZero(form.threshold);
   const baseBackoffSec = parseIntOrZero(form.baseBackoffSec);
+  const backoffMultiplier = parsePositiveFloat(form.backoffMultiplier);
   const maxBackoffSec = parseIntOrZero(form.maxBackoffSec);
   if (windowSec > 0) repeat.windowSec = windowSec;
   if (threshold > 0) repeat.threshold = threshold;
   if (baseBackoffSec > 0) repeat.baseBackoffSec = baseBackoffSec;
+  if (backoffMultiplier > 0) repeat.backoffMultiplier = backoffMultiplier;
   if (maxBackoffSec > 0) repeat.maxBackoffSec = maxBackoffSec;
   repeat.dedupeByMessage = form.dedupeByMessage;
   const dedupeFields = splitCSV(form.dedupeFields);
@@ -1812,6 +1966,59 @@ function buildRulePayloadFromForm(form: RuleFormState): {
     source: form.source,
     match,
     repeat,
+    targets,
+  };
+}
+
+function buildMonitorRulePayload(
+  form: MonitorRuleFormState,
+  monitors: MonitorDefinition[],
+): {
+  name: string;
+  enabled: boolean;
+  source: AlertRuleSource;
+  match: Record<string, unknown>;
+  repeat: Record<string, unknown>;
+  targets: Record<string, unknown>;
+} {
+  const monitorId = parseIntOrZero(form.monitorId);
+  const monitor = monitors.find((m) => m.id === monitorId);
+  if (!monitor) throw new Error("请选择监控项");
+
+  const targets: Record<string, unknown> = {};
+  if (form.emailGroupIds.length > 0) targets.emailGroupIds = uniqueInts(form.emailGroupIds);
+  if (form.emailContactIds.length > 0) targets.emailContactIds = uniqueInts(form.emailContactIds);
+  if (form.smsGroupIds.length > 0) targets.smsGroupIds = uniqueInts(form.smsGroupIds);
+  if (form.smsContactIds.length > 0) targets.smsContactIds = uniqueInts(form.smsContactIds);
+  if (form.wecomBotIds.length > 0) targets.wecomBotIds = uniqueInts(form.wecomBotIds);
+  if (form.webhookEndpointIds.length > 0) targets.webhookEndpointIds = uniqueInts(form.webhookEndpointIds);
+  if (Object.keys(targets).length === 0) throw new Error("请选择至少一个通知目标");
+
+  const baseBackoffSec = parseIntOrZero(form.baseBackoffSec) || 300;
+  const backoffMultiplier = parsePositiveFloat(form.backoffMultiplier) || 2;
+  const maxBackoffSec = parseIntOrZero(form.maxBackoffSec) || 604800;
+
+  return {
+    name: `监控告警 - ${monitor.name || `#${monitor.id}`}`,
+    enabled: true,
+    source: "logs",
+    match: {
+      levels: form.level === "warn" ? ["warn", "error"] : ["error"],
+      fieldsAll: [
+        { path: "source_type", op: "eq", value: monitor.detector_type },
+        { path: "signal_status", op: "eq", value: "firing" },
+        { path: "monitor_id", op: "eq", value: String(monitor.id) },
+      ],
+    },
+    repeat: {
+      windowSec: 60,
+      threshold: 1,
+      baseBackoffSec,
+      backoffMultiplier,
+      maxBackoffSec,
+      dedupeByMessage: true,
+      dedupeFields: ["monitor_id"],
+    },
     targets,
   };
 }
@@ -1845,7 +2052,8 @@ function ruleToForm(rule: AlertRule): RuleFormState {
     windowSec: String(intFromUnknown(repeat.windowSec, 60)),
     threshold: String(intFromUnknown(repeat.threshold, 1)),
     baseBackoffSec: String(intFromUnknown(repeat.baseBackoffSec, 60)),
-    maxBackoffSec: String(intFromUnknown(repeat.maxBackoffSec, 3600)),
+    backoffMultiplier: String(floatFromUnknown(repeat.backoffMultiplier, 2)),
+    maxBackoffSec: String(intFromUnknown(repeat.maxBackoffSec, 604800)),
     dedupeByMessage: boolFromUnknown(repeat.dedupeByMessage, true),
     dedupeFields: toCSV(asArray(repeat.dedupeFields).map((v) => toText(v)).filter((v) => v !== "")),
     emailGroupIds: uniqueInts(asArray(targets.emailGroupIds).map((v) => parseIntOrZero(toText(v))).filter((v) => v > 0)),
@@ -1858,6 +2066,29 @@ function ruleToForm(rule: AlertRule): RuleFormState {
     ),
     pluginChannels: parsePluginChannels(targets.channels),
   };
+}
+
+function isMonitorRule(rule: AlertRule): boolean {
+  const fields = asArray(asRecord(rule.match).fieldsAll).map((item) => asRecord(item));
+  return fields.some((f) => toText(f.path) === "monitor_id") && fields.some((f) => toText(f.path) === "source_type");
+}
+
+function monitorLabelFromRule(rule: AlertRule, monitors: MonitorDefinition[]): string {
+  const monitorID = getRuleFieldValue(rule, "monitor_id");
+  const id = parseIntOrZero(monitorID);
+  const monitor = monitors.find((m) => m.id === id);
+  if (monitor) return `#${monitor.id} ${monitor.name}`;
+  return monitorID ? `#${monitorID}` : "-";
+}
+
+function ruleLevels(rule: AlertRule): string[] {
+  return asArray(asRecord(rule.match).levels).map((v) => toText(v)).filter((v) => v !== "");
+}
+
+function getRuleFieldValue(rule: AlertRule, path: string): string {
+  const fields = asArray(asRecord(rule.match).fieldsAll).map((item) => asRecord(item));
+  const row = fields.find((f) => toText(f.path) === path);
+  return row ? toText(row.value) : "";
 }
 
 function asRecord(v: unknown): Record<string, unknown> {
@@ -1918,6 +2149,17 @@ function parseIntOrZero(raw: string): number {
 
 function intFromUnknown(v: unknown, defaultValue: number): number {
   const n = parseIntOrZero(toText(v));
+  return n > 0 ? n : defaultValue;
+}
+
+function parsePositiveFloat(raw: string): number {
+  const n = Number(raw.trim());
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n;
+}
+
+function floatFromUnknown(v: unknown, defaultValue: number): number {
+  const n = parsePositiveFloat(toText(v));
   return n > 0 ? n : defaultValue;
 }
 

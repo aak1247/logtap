@@ -128,9 +128,6 @@ func (e *Engine) previewDecision(ctx context.Context, rule model.AlertRule, in I
 	if !effective.LastSeenAt.IsZero() && now.Sub(effective.LastSeenAt) > window {
 		prev.WindowExpired = true
 		effective.Occurrences = 0
-		effective.BackoffExp = 0
-		effective.LastSentAt = time.Unix(0, 0).UTC()
-		effective.NextAllowedAt = time.Unix(0, 0).UTC()
 	}
 
 	prev.OccurrencesAfter = effective.Occurrences + 1
@@ -152,17 +149,7 @@ func (e *Engine) previewDecision(ctx context.Context, rule model.AlertRule, in I
 	prev.NextAllowedAtAfter = normalizeEpochZero(effective.NextAllowedAt)
 
 	if willSend {
-		delay := time.Duration(rep.BaseBackoffSec) * time.Second
-		if effective.BackoffExp > 0 {
-			for i := 0; i < effective.BackoffExp; i++ {
-				delay *= 2
-				max := time.Duration(rep.MaxBackoffSec) * time.Second
-				if delay >= max {
-					delay = max
-					break
-				}
-			}
-		}
+		delay := computeBackoffDelay(rep, effective.BackoffExp)
 		prev.BackoffExpAfter = effective.BackoffExp + 1
 		prev.NextAllowedAtAfter = now.Add(delay)
 

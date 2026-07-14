@@ -204,6 +204,7 @@ func (w *Worker) executeOne(ctx context.Context, item model.MonitorDefinition) e
 			return w.finalizeRun(ctx, item, startedAt, res)
 		}
 		res.SignalCount++
+		appendSignalSample(res.Details, normalized)
 	}
 	res.Details["signals"] = res.SignalCount
 	res.Details["intervalSec"] = intervalSec
@@ -271,6 +272,41 @@ func (w *Worker) finalizeRun(ctx context.Context, item model.MonitorDefinition, 
 			Where("id = ?", item.ID).
 			Updates(update).Error
 	})
+}
+
+func appendSignalSample(details map[string]any, sig detector.Signal) {
+	if details == nil {
+		return
+	}
+	const maxSamples = 5
+	samples, _ := details["signalSamples"].([]map[string]any)
+	if len(samples) >= maxSamples {
+		return
+	}
+	sample := map[string]any{
+		"source":   sig.Source,
+		"severity": sig.Severity,
+		"status":   sig.Status,
+		"message":  sig.Message,
+	}
+	if v := firstStringField(sig.Fields, "cert_verify_error", "error"); v != "" {
+		sample["error"] = v
+	}
+	details["signalSamples"] = append(samples, sample)
+}
+
+func firstStringField(fields map[string]any, keys ...string) string {
+	if len(fields) == 0 {
+		return ""
+	}
+	for _, key := range keys {
+		if v, ok := fields[key]; ok {
+			if s, ok := v.(string); ok {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 func normalizeSignal(item model.MonitorDefinition, sig detector.Signal, now time.Time) detector.Signal {

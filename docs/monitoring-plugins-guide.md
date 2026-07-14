@@ -123,7 +123,8 @@ Authorization: Bearer <token>
     "windowSec": 60,
     "threshold": 1,
     "baseBackoffSec": 60,
-    "maxBackoffSec": 3600
+    "backoffMultiplier": 2,
+    "maxBackoffSec": 604800
   },
   "targets": {
     "webhookEndpointIds": [1]
@@ -199,7 +200,8 @@ POST /api/123/alerts/rules
     "windowSec": 60,
     "threshold": 1,
     "baseBackoffSec": 60,
-    "maxBackoffSec": 3600
+    "backoffMultiplier": 2,
+    "maxBackoffSec": 604800
   },
   "targets": {
     "webhookEndpointIds": [1]
@@ -291,4 +293,3 @@ _ = err
 - 下一步可以考虑：
   - 在文档中补充更多真实案例（例如监控某个 SaaS API、数据库端口、队列长度等）；
   - 如果你计划引入 metrics 管道，可以优先考虑把 `metric_threshold` 更好地嫁接到 Monitor/Alert 流程中。
-

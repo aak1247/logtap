@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -17,10 +18,12 @@ import (
 )
 
 type Engine struct {
-	DB            *gorm.DB
-	Now           func() time.Time
-	ChannelSvc    *channel.Service // optional; when set, used for new-format channels
+	DB         *gorm.DB
+	Now        func() time.Time
+	ChannelSvc *channel.Service // optional; when set, used for new-format channels
 }
+
+const defaultMaxBackoffSec = 7 * 24 * 60 * 60
 
 func NewEngine(db *gorm.DB, channelSvc *channel.Service) *Engine {
 	return &Engine{DB: db, Now: time.Now, ChannelSvc: channelSvc}
@@ -104,12 +107,33 @@ func applyRepeatDefaults(r *RuleRepeat) {
 	if r.BaseBackoffSec <= 0 {
 		r.BaseBackoffSec = 60
 	}
+	if r.BackoffMultiplier <= 0 {
+		r.BackoffMultiplier = 2
+	}
+	if r.BackoffMultiplier < 1 {
+		r.BackoffMultiplier = 1
+	}
 	if r.MaxBackoffSec <= 0 {
-		r.MaxBackoffSec = 3600
+		r.MaxBackoffSec = defaultMaxBackoffSec
 	}
 	if r.MaxBackoffSec < r.BaseBackoffSec {
 		r.MaxBackoffSec = r.BaseBackoffSec
 	}
+}
+
+func computeBackoffDelay(rep RuleRepeat, backoffExp int) time.Duration {
+	applyRepeatDefaults(&rep)
+	delaySec := float64(rep.BaseBackoffSec)
+	for i := 0; i < backoffExp; i++ {
+		delaySec *= rep.BackoffMultiplier
+		if delaySec >= float64(rep.MaxBackoffSec) {
+			return time.Duration(rep.MaxBackoffSec) * time.Second
+		}
+	}
+	if delaySec < 1 {
+		delaySec = 1
+	}
+	return time.Duration(math.Round(delaySec)) * time.Second
 }
 
 func computeDedupeKeyHash(ruleID int, in Input, rep RuleRepeat) string {
@@ -165,26 +189,13 @@ func (e *Engine) updateStateAndDecide(ctx context.Context, ruleID int, keyHash s
 
 		if !cur.LastSeenAt.IsZero() && now.Sub(cur.LastSeenAt) > window {
 			cur.Occurrences = 0
-			cur.BackoffExp = 0
-			cur.LastSentAt = time.Unix(0, 0).UTC()
-			cur.NextAllowedAt = time.Unix(0, 0).UTC()
 		}
 		cur.Occurrences++
 		cur.LastSeenAt = now
 
 		shouldSend = cur.Occurrences >= rep.Threshold && (cur.NextAllowedAt.IsZero() || !now.Before(cur.NextAllowedAt))
 		if shouldSend {
-			delay := time.Duration(rep.BaseBackoffSec) * time.Second
-			if cur.BackoffExp > 0 {
-				for i := 0; i < cur.BackoffExp; i++ {
-					delay *= 2
-					max := time.Duration(rep.MaxBackoffSec) * time.Second
-					if delay >= max {
-						delay = max
-						break
-					}
-				}
-			}
+			delay := computeBackoffDelay(rep, cur.BackoffExp)
 			cur.BackoffExp++
 			cur.LastSentAt = now
 			cur.NextAllowedAt = now.Add(delay)

@@ -13,6 +13,7 @@ import { BootstrapPage } from "./ui/pages/BootstrapPage";
 import { DocsPage } from "./ui/pages/DocsPage";
 import { SettingsPage } from "./ui/pages/SettingsPage";
 import { AlertsPage } from "./ui/pages/AlertsPage";
+import { MonitorsPage } from "./ui/pages/MonitorsPage";
 import { PluginPage } from "./ui/pages/PluginPage";
 import { loadSettings, subscribeSettingsChange } from "./lib/storage";
 import "./ui/pluginExtensions/builtins";
@@ -47,6 +48,7 @@ export const router = createBrowserRouter([
       { path: "events", element: <EventsPage /> },
       { path: "events/:eventId", element: <EventDetailPage /> },
       { path: "logs", element: <LogsPage /> },
+      { path: "monitors", element: <MonitorsPage /> },
       { path: "alerts", element: <AlertsPage /> },
       { path: "plugins/:pluginId", element: <PluginPage /> },
       { path: "settings", element: <SettingsPage /> },

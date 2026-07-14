@@ -77,8 +77,8 @@ func (AlertRule) TableName() string { return "alert_rules" }
 
 type AlertState struct {
 	ID            int       `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
-	RuleID        int       `gorm:"not null;index:idx_alert_states_rule_key,priority:1;column:rule_id" json:"rule_id"`
-	KeyHash       string    `gorm:"type:varchar(64);not null;index:idx_alert_states_rule_key,priority:2;column:key_hash" json:"key_hash"`
+	RuleID        int       `gorm:"not null;uniqueIndex:idx_alert_states_rule_key,priority:1;column:rule_id" json:"rule_id"`
+	KeyHash       string    `gorm:"type:varchar(64);not null;uniqueIndex:idx_alert_states_rule_key,priority:2;column:key_hash" json:"key_hash"`
 	Occurrences   int       `gorm:"not null;default:0;column:occurrences" json:"occurrences"`
 	BackoffExp    int       `gorm:"not null;default:0;column:backoff_exp" json:"backoff_exp"`
 	LastSeenAt    time.Time `gorm:"not null;column:last_seen_at" json:"last_seen_at"`

@@ -155,6 +155,17 @@ func (Plugin) Execute(ctx context.Context, req detector.ExecuteRequest) ([]detec
 		"port": fmt.Sprintf("%d", c.Port),
 	}
 
+	// Verify the certificate after the permissive handshake. The TLS dial uses
+	// InsecureSkipVerify so we can inspect invalid certificates and return a
+	// monitor signal instead of failing before we can collect details.
+	if verifyErr := verifyPeerCertificate(c.Host, certs, now); verifyErr != nil {
+		severity = "error"
+		status = "firing"
+		message = fmt.Sprintf("certificate verification failed: %v", verifyErr)
+		fields["success"] = false
+		fields["cert_verify_error"] = verifyErr.Error()
+	}
+
 	// Check expiry
 	daysLeft := leaf.NotAfter.Sub(now).Hours() / 24
 	fields["cert_days_left"] = daysLeft
@@ -222,6 +233,30 @@ func (Plugin) Execute(ctx context.Context, req detector.ExecuteRequest) ([]detec
 		OccurredAt: now,
 	}
 	return []detector.Signal{sig}, nil
+}
+
+func verifyPeerCertificate(host string, certs []*x509.Certificate, now time.Time) error {
+	if len(certs) == 0 {
+		return errors.New("no peer certificates found")
+	}
+	roots, err := x509.SystemCertPool()
+	if err != nil {
+		return err
+	}
+	if roots == nil {
+		roots = x509.NewCertPool()
+	}
+	intermediates := x509.NewCertPool()
+	for _, cert := range certs[1:] {
+		intermediates.AddCert(cert)
+	}
+	_, err = certs[0].Verify(x509.VerifyOptions{
+		DNSName:       host,
+		Roots:         roots,
+		Intermediates: intermediates,
+		CurrentTime:   now,
+	})
+	return err
 }
 
 func isSelfSignedCert(leaf *x509.Certificate, chain []*x509.Certificate) bool {
