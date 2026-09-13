@@ -1,6 +1,6 @@
 # logtap
 
-English | [简体中文](README.zh-CN.md)
+English | [Chinese](README.zh-CN.md)
 
 [![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Gin](https://img.shields.io/badge/Gin-Framework-00B386)](https://gin-gonic.com/)
