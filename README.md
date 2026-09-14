@@ -4,10 +4,15 @@ English | [简体中文](README.zh-CN.md)
 
 [![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Gin](https://img.shields.io/badge/Gin-Framework-00B386)](https://gin-gonic.com/)
+[![NSQ](https://img.shields.io/badge/NSQ-Queue-00B4D8)](https://nsq.io/)
+[![TimescaleDB](https://img.shields.io/badge/TimescaleDB-Time_Series-FDB515?logo=timescale&logoColor=white)](https://www.timescale.com/)
 [![Postgres](https://img.shields.io/badge/PostgreSQL-DB-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-Optional-DC382D?logo=redis&logoColor=white)](https://redis.io/)
 [![React](https://img.shields.io/badge/React-Console-61DAFB?logo=react&logoColor=white)](web/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-Styling-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
 [![Vite](https://img.shields.io/badge/Vite-Build-646CFF?logo=vite&logoColor=white)](web/)
+[![Playwright](https://img.shields.io/badge/Playwright-E2E-2EAD33?logo=playwright&logoColor=white)](web/e2e)
 
 A lightweight Sentry-compatible error reporting and structured logging gateway (Go + Gin + NSQ + TimescaleDB/Postgres).
 
