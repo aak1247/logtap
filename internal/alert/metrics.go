@@ -7,6 +7,9 @@ var (
 	engineMatchedTotal  = expvar.NewInt("alert_engine_matched_total")
 	engineEnqueuedTotal = expvar.NewInt("alert_engine_enqueued_total")
 
+	engineAsyncDroppedTotal = expvar.NewInt("alert_engine_async_dropped_total")
+	engineAsyncErrorTotal   = expvar.NewInt("alert_engine_async_error_total")
+
 	workerClaimedTotal  = expvar.NewInt("alert_worker_claimed_total")
 	workerRequeuedTotal = expvar.NewInt("alert_worker_requeued_processing_total")
 

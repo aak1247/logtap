@@ -86,12 +86,21 @@ func TestIntegration_Alerting_Webhook_Delivery(t *testing.T) {
 		t.Fatalf("ingest status=%d body=%s", status, string(body))
 	}
 
+	// Alert evaluation is asynchronous relative to ingest; poll for the
+	// delivery to be enqueued (allowing for rule-cache refresh latency).
 	var pending []model.AlertDelivery
-	if err := srv.DB.Where("project_id = ? AND status = ?", boot.ProjectID, "pending").Find(&pending).Error; err != nil {
-		t.Fatalf("query deliveries: %v", err)
-	}
-	if len(pending) != 1 {
-		t.Fatalf("expected 1 pending delivery, got %d", len(pending))
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if err := srv.DB.Where("project_id = ? AND status = ?", boot.ProjectID, "pending").Find(&pending).Error; err != nil {
+			t.Fatalf("query deliveries: %v", err)
+		}
+		if len(pending) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected 1 pending delivery within deadline, got %d", len(pending))
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	worker := alert.NewWorker(srv.DB, srv.Config)

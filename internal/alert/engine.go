@@ -9,6 +9,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aak1247/logtap/internal/channel"
@@ -21,12 +22,21 @@ type Engine struct {
 	DB         *gorm.DB
 	Now        func() time.Time
 	ChannelSvc *channel.Service // optional; when set, used for new-format channels
+	// RuleCacheTTL bounds how long parsed rule sets are cached per
+	// (project, source). Zero or negative disables the cache.
+	RuleCacheTTL time.Duration
+
+	ruleCache sync.Map // ruleCacheKey -> *ruleSetCacheEntry
 }
 
 const defaultMaxBackoffSec = 7 * 24 * 60 * 60
 
+// defaultRuleCacheTTL keeps rule edits observable within seconds while
+// removing the per-message rule query and JSON re-parsing from the hot path.
+const defaultRuleCacheTTL = 10 * time.Second
+
 func NewEngine(db *gorm.DB, channelSvc *channel.Service) *Engine {
-	return &Engine{DB: db, Now: time.Now, ChannelSvc: channelSvc}
+	return &Engine{DB: db, Now: time.Now, ChannelSvc: channelSvc, RuleCacheTTL: defaultRuleCacheTTL}
 }
 
 func (e *Engine) Evaluate(ctx context.Context, in Input) error {
@@ -36,41 +46,20 @@ func (e *Engine) Evaluate(ctx context.Context, in Input) error {
 	engineEvaluateTotal.Add(1)
 	now := e.Now().UTC()
 
-	var rules []model.AlertRule
-	q := e.DB.WithContext(ctx).
-		Where("project_id = ? AND enabled = true", in.ProjectID)
-	switch in.Source {
-	case SourceLogs:
-		q = q.Where("source IN ?", []string{string(SourceLogs), string(SourceBoth)})
-	case SourceEvents:
-		q = q.Where("source IN ?", []string{string(SourceEvents), string(SourceBoth)})
-	default:
-		q = q.Where("source IN ?", []string{string(SourceBoth), string(SourceLogs), string(SourceEvents)})
-	}
-	if err := q.Find(&rules).Error; err != nil {
+	rules, err := e.rulesFor(ctx, in.ProjectID, in.Source)
+	if err != nil {
 		return err
 	}
 
-	for _, r := range rules {
-		rm := RuleMatch{}
-		_ = json.Unmarshal(r.Match, &rm)
-		if !matchRule(rm, in) {
+	for _, cr := range rules {
+		if !matchRule(cr.match, in) {
 			continue
 		}
 		engineMatchedTotal.Add(1)
 
-		rep := RuleRepeat{}
-		_ = json.Unmarshal(r.Repeat, &rep)
-		applyRepeatDefaults(&rep)
+		keyHash := computeDedupeKeyHash(cr.rule.ID, in, cr.repeat)
 
-		targets := RuleTargets{}
-		_ = json.Unmarshal(r.Targets, &targets)
-
-		newChannels, _ := channel.ParseChannels(json.RawMessage(r.Targets))
-
-		keyHash := computeDedupeKeyHash(r.ID, in, rep)
-
-		shouldSend, err := e.updateStateAndDecide(ctx, r.ID, keyHash, now, rep)
+		shouldSend, err := e.updateStateAndDecide(ctx, cr.rule.ID, keyHash, now, cr.repeat)
 		if err != nil {
 			return err
 		}
@@ -78,13 +67,13 @@ func (e *Engine) Evaluate(ctx context.Context, in Input) error {
 			continue
 		}
 
-		title, content := formatNotification(r, in)
-		if len(newChannels) > 0 {
-			if err := e.enqueueChannelDeliveries(ctx, r, newChannels, title, content, now); err != nil {
+		title, content := formatNotification(cr.rule, in)
+		if len(cr.channels) > 0 {
+			if err := e.enqueueChannelDeliveries(ctx, cr.rule, cr.channels, title, content, now); err != nil {
 				return err
 			}
 		} else {
-			if err := e.enqueueDeliveries(ctx, r, targets, title, content, now); err != nil {
+			if err := e.enqueueDeliveries(ctx, cr.rule, cr.targets, title, content, now); err != nil {
 				return err
 			}
 		}
