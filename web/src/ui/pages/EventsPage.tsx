@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getRecentEvents, type RecentEvent } from "../../lib/api";
 import { loadSettings } from "../../lib/storage";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { Panel } from "../components/Panel";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -8,6 +9,7 @@ export function EventsPage() {
   const settings = useMemo(() => loadSettings(), []);
   const nav = useNavigate();
   const [limit, setLimit] = useState(100);
+  const debouncedLimit = useDebouncedValue(limit);
   const [events, setEvents] = useState<RecentEvent[]>([]);
   const [err, setErr] = useState("");
 
@@ -25,7 +27,7 @@ export function EventsPage() {
       try {
         if (!settings.token || !settings.projectId) return;
         setErr("");
-        const data = await getRecentEvents(settings, limit);
+        const data = await getRecentEvents(settings, debouncedLimit);
         if (!cancelled) setEvents(data);
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
@@ -34,7 +36,7 @@ export function EventsPage() {
     return () => {
       cancelled = true;
     };
-  }, [settings.apiBase, settings.projectId, limit]);
+  }, [settings.apiBase, settings.projectId, debouncedLimit]);
 
   return (
     <div className="space-y-4">

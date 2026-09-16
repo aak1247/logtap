@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { loadSettings } from "../../lib/storage";
 import { searchLogs, searchUnified, type LogRow } from "../../lib/api";
 import { Panel } from "../components/Panel";
@@ -271,39 +271,7 @@ export function LogsPage() {
               </thead>
               <tbody className="divide-y divide-zinc-900">
                 {rows.map((r) => (
-                  <tr key={r.id} className="align-top hover:bg-zinc-900/40">
-                    <td className="py-1.5 pr-4 font-mono text-[11px] text-zinc-400">
-                      {new Date(r.timestamp).toLocaleString()}
-                    </td>
-                    <td className="py-1.5 pr-4">
-                      <LevelPill level={r.level} />
-                    </td>
-                    <td className="py-1.5 pr-4 font-mono text-[11px] text-zinc-500">
-                      <div>{r.trace_id ?? ""}</div>
-                      <div>{r.span_id ?? ""}</div>
-                    </td>
-                    <td className="py-1.5 pr-4 text-zinc-100">
-                      <div
-                        className="text-xs leading-5"
-                        dangerouslySetInnerHTML={{
-                          __html: highlightText(r.message, highlightTerms),
-                        }}
-                      />
-                      {r.fields ? (
-                        <details className="group mt-1.5">
-                          <summary className="cursor-pointer select-none text-[11px] text-zinc-400 marker:text-zinc-600 hover:text-zinc-200">
-                            fields <span className="text-zinc-500">({countKeys(r.fields)})</span>{" "}
-                            <span className="group-open:hidden">展开</span>
-                            <span className="hidden group-open:inline">收起</span>
-                            <span className="ml-2 text-zinc-500">{fieldsPreview(r.fields)}</span>
-                          </summary>
-                          <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-zinc-950/40 p-2 font-mono text-[11px] leading-4 text-zinc-200 ring-1 ring-zinc-900">
-                            {JSON.stringify(r.fields, null, 2)}
-                          </pre>
-                        </details>
-                      ) : null}
-                    </td>
-                  </tr>
+                  <LogRowItem key={r.id} row={r} terms={highlightTerms} />
                 ))}
                 {rows.length === 0 ? (
                   <tr>
@@ -319,6 +287,79 @@ export function LogsPage() {
       </div>
     </div>
   );
+}
+
+type LogRowItemProps = { row: LogRow; terms: string[] };
+
+// Per-row derived values (date formatting, pretty-printed JSON, highlighting)
+// are memoized so re-renders triggered by typing in the query box do not
+// recompute them for every row of a 200-row result set.
+const LogRowItem = memo(
+  function LogRowItem({ row, terms }: LogRowItemProps) {
+    const timeText = useMemo(
+      () => new Date(row.timestamp).toLocaleString(),
+      [row.timestamp],
+    );
+    const highlighted = useMemo(
+      () => highlightText(row.message ?? "", terms),
+      [row.message, terms],
+    );
+    const fieldCount = useMemo(
+      () => countKeys(row.fields ?? {}),
+      [row.fields],
+    );
+    const preview = useMemo(
+      () => fieldsPreview(row.fields ?? {}),
+      [row.fields],
+    );
+    const fieldsPretty = useMemo(
+      () => (row.fields ? JSON.stringify(row.fields, null, 2) : ""),
+      [row.fields],
+    );
+    return (
+      <tr className="align-top hover:bg-zinc-900/40">
+        <td className="py-1.5 pr-4 font-mono text-[11px] text-zinc-400">
+          {timeText}
+        </td>
+        <td className="py-1.5 pr-4">
+          <LevelPill level={row.level} />
+        </td>
+        <td className="py-1.5 pr-4 font-mono text-[11px] text-zinc-500">
+          <div>{row.trace_id ?? ""}</div>
+          <div>{row.span_id ?? ""}</div>
+        </td>
+        <td className="py-1.5 pr-4 text-zinc-100">
+          <div
+            className="text-xs leading-5"
+            dangerouslySetInnerHTML={{ __html: highlighted }}
+          />
+          {row.fields ? (
+            <details className="group mt-1.5">
+              <summary className="cursor-pointer select-none text-[11px] text-zinc-400 marker:text-zinc-600 hover:text-zinc-200">
+                fields <span className="text-zinc-500">({fieldCount})</span>{" "}
+                <span className="group-open:hidden">展开</span>
+                <span className="hidden group-open:inline">收起</span>
+                <span className="ml-2 text-zinc-500">{preview}</span>
+              </summary>
+              <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-zinc-950/40 p-2 font-mono text-[11px] leading-4 text-zinc-200 ring-1 ring-zinc-900">
+                {fieldsPretty}
+              </pre>
+            </details>
+          ) : null}
+        </td>
+      </tr>
+    );
+  },
+  (a, b) => a.row === b.row && sameTerms(a.terms, b.terms),
+);
+
+function sameTerms(a: string[], b: string[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
 
 function highlightText(text: string, terms: string[]): string {

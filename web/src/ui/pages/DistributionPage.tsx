@@ -7,6 +7,7 @@ import {
   type DistributionSeriesResponse,
 } from "../../lib/api";
 import { loadSettings } from "../../lib/storage";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { Panel } from "../components/Panel";
 
 const DIM_OPTIONS: { value: DistributionDim; label: string }[] = [
@@ -36,6 +37,7 @@ export function DistributionPage() {
   const [bucket, setBucket] = useState<DistributionBucket>("day");
   const [metric, setMetric] = useState<DistributionMetric>("users");
   const [limit, setLimit] = useState(10);
+  const debouncedLimit = useDebouncedValue(limit);
   const [range, setRange] = useState(() => defaultRange("day"));
   const [data, setData] = useState<DistributionSeriesResponse | null>(null);
   const [err, setErr] = useState("");
@@ -52,7 +54,7 @@ export function DistributionPage() {
           dim,
           bucket,
           metric,
-          limit,
+          limit: debouncedLimit,
           start: range.start,
           end: range.end,
         });
@@ -73,7 +75,7 @@ export function DistributionPage() {
     dim,
     bucket,
     metric,
-    limit,
+    debouncedLimit,
     range.start,
     range.end,
   ]);
