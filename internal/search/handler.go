@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -49,7 +50,11 @@ func SearchHandler(engine *SearchEngine) gin.HandlerFunc {
 			pageSize = 500
 		}
 
-		result, err := engine.Search(c.Request.Context(), q, projectID, TimeRange{
+		// Bound slow ILIKE scans so they cannot hold a pool connection until
+		// the client disconnects.
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		result, err := engine.Search(ctx, q, projectID, TimeRange{
 			Start: start,
 			End:   end,
 		}, page, pageSize)

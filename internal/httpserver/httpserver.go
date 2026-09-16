@@ -148,6 +148,7 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 			queryAPI.POST("/events/schema", query.CreateEventDefinitionHandler(db))
 			queryAPI.PUT("/events/schema/:eventName", query.UpdateEventDefinitionHandler(db))
 			queryAPI.GET("/logs/search", query.SearchLogsHandler(db))
+			queryAPI.GET("/logs/trend", query.LogTrendHandler(db))
 			// Unified search endpoint (v1: queries logs table via adapter)
 			if db != nil {
 				searchEngine := search.NewEngine(searchpostgres.NewAdapter(db))
@@ -232,6 +233,9 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 		Addr:              cfg.HTTPAddr,
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      300 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 }
 
