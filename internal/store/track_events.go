@@ -114,12 +114,7 @@ func lockLogIngestIDs(ctx context.Context, db *gorm.DB, logs []model.Log) error 
 		seen[key] = true
 		keys = append(keys, key)
 	}
-	for _, key := range keys {
-		if err := db.WithContext(ctx).Exec(`SELECT pg_advisory_xact_lock(hashtextextended(?, 0))`, key).Error; err != nil {
-			return fmt.Errorf("lock log ingest id: %w", err)
-		}
-	}
-	return nil
+	return lockAdvisoryKeys(ctx, db, keys, "log ingest id")
 }
 
 func filterExistingLogIngestIDs(ctx context.Context, db *gorm.DB, logs []model.Log) ([]model.Log, error) {

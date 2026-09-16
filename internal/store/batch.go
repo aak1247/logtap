@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/aak1247/logtap/internal/model"
@@ -66,14 +67,35 @@ func lockEventIDs(ctx context.Context, db *gorm.DB, rows []model.Event) error {
 		return nil
 	}
 	seen := map[uuid.UUID]bool{}
+	keys := make([]string, 0, len(rows))
 	for _, row := range rows {
 		if row.ID == uuid.Nil || seen[row.ID] {
 			continue
 		}
 		seen[row.ID] = true
-		if err := db.WithContext(ctx).Exec(`SELECT pg_advisory_xact_lock(hashtextextended(?, 0))`, row.ID.String()).Error; err != nil {
-			return fmt.Errorf("lock event id: %w", err)
-		}
+		keys = append(keys, row.ID.String())
+	}
+	return lockAdvisoryKeys(ctx, db, keys, "event id")
+}
+
+// lockAdvisoryKeys takes all transaction-scoped advisory locks in a single
+// round trip. Keys are sorted so concurrent batches acquire overlapping locks
+// in a consistent order, avoiding lock-order deadlocks.
+func lockAdvisoryKeys(ctx context.Context, db *gorm.DB, keys []string, what string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	sort.Strings(keys)
+	placeholders := make([]string, len(keys))
+	args := make([]any, len(keys))
+	for i, k := range keys {
+		placeholders[i] = "(?)"
+		args[i] = k
+	}
+	stmt := `SELECT pg_advisory_xact_lock(hashtextextended(k, 0)) FROM (VALUES ` +
+		strings.Join(placeholders, ",") + `) AS v(k)`
+	if err := db.WithContext(ctx).Exec(stmt, args...).Error; err != nil {
+		return fmt.Errorf("lock %s: %w", what, err)
 	}
 	return nil
 }
