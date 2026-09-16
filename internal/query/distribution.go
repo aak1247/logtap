@@ -49,6 +49,7 @@ func DistributionHandler(recorder *metrics.RedisRecorder) gin.HandlerFunc {
 		if !okStart {
 			start = end.AddDate(0, 0, -6) // 7 days incl today
 		}
+		start = clampDistSpan(start, end, "")
 		metric := parseDistMetric(c.Query("metric"))
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
@@ -114,6 +115,7 @@ func DistributionSeriesHandler(recorder *metrics.RedisRecorder) gin.HandlerFunc 
 		if !okStart {
 			start = defaultDistributionStart(end, bucket)
 		}
+		start = clampDistSpan(start, end, bucket)
 		metric := parseDistMetric(c.Query("metric"))
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
@@ -154,4 +156,24 @@ func defaultDistributionStart(end time.Time, bucket string) time.Time {
 	default:
 		return end.AddDate(0, 0, -29)
 	}
+}
+
+// clampDistSpan bounds the requested range so one dashboard request cannot
+// make the metrics layer iterate an unbounded number of days of Redis keys.
+func clampDistSpan(start, end time.Time, bucket string) time.Time {
+	var maxSpan time.Duration
+	switch bucket {
+	case "week":
+		maxSpan = 3 * 365 * 24 * time.Hour
+	case "month":
+		maxSpan = 2 * 365 * 24 * time.Hour
+	case "year":
+		maxSpan = 10 * 365 * 24 * time.Hour
+	default:
+		maxSpan = 180 * 24 * time.Hour
+	}
+	if minStart := end.Add(-maxSpan); start.Before(minStart) {
+		return minStart
+	}
+	return start
 }

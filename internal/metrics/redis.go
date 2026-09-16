@@ -864,8 +864,14 @@ func (r *RedisRecorder) distributionUsersForWindow(ctx context.Context, projectI
 
 func (r *RedisRecorder) distributionUserKeysForDay(ctx context.Context, projectID int, dim string, day string) (map[string][]string, error) {
 	pattern := fmt.Sprintf("dist_users:%s:%d:%s:*", dim, projectID, day)
-	keys, err := r.rdb.Keys(ctx, pattern).Result()
-	if err != nil && err != redis.Nil {
+	// SCAN instead of KEYS: KEYS blocks the single-threaded Redis server for
+	// O(keyspace); SCAN walks incrementally without stalling other clients.
+	var keys []string
+	iter := r.rdb.Scan(ctx, 0, pattern, 500).Iterator()
+	for iter.Next(ctx) {
+		keys = append(keys, iter.Val())
+	}
+	if err := iter.Err(); err != nil && err != redis.Nil {
 		return nil, err
 	}
 	out := make(map[string][]string, len(keys))

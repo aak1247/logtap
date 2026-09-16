@@ -4,12 +4,36 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aak1247/logtap/internal/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// tableExistCache avoids an information_schema round trip per HasTable check
+// on hot metrics endpoints. Schema is created during startup migrations, so
+// results are stable for the life of a *gorm.DB.
+var tableExistCache sync.Map // tableExistKey -> bool
+
+type tableExistKey struct {
+	db    *gorm.DB
+	table string
+}
+
+func tableExists(db *gorm.DB, table string) bool {
+	if db == nil {
+		return false
+	}
+	key := tableExistKey{db: db, table: table}
+	if v, ok := tableExistCache.Load(key); ok {
+		return v.(bool)
+	}
+	ok := db.Migrator().HasTable(table)
+	tableExistCache.Store(key, ok)
+	return ok
+}
 
 const (
 	CounterLogsTotal   = "logs_total"
@@ -68,7 +92,7 @@ func GetDBMetricsToday(ctx context.Context, db *gorm.DB, projectID int, now time
 		return out, false, nil
 	}
 	day := now.UTC().Format("2006-01-02")
-	if db.Migrator().HasTable(model.LogDailyStat{}.TableName()) {
+	if tableExists(db, model.LogDailyStat{}.TableName()) {
 		type row struct {
 			Kind  string `gorm:"column:kind"`
 			Level string `gorm:"column:level"`
@@ -96,7 +120,7 @@ func GetDBMetricsToday(ctx context.Context, db *gorm.DB, projectID int, now time
 
 	raw, rawOK, err := GetDBMetricsTodayRaw(ctx, db, projectID, now)
 	if err != nil || !rawOK {
-		return out, rawOK || db.Migrator().HasTable(model.LogDailyStat{}.TableName()), err
+		return out, rawOK || tableExists(db, model.LogDailyStat{}.TableName()), err
 	}
 	if raw.Logs > out.Logs {
 		out.Logs = raw.Logs
@@ -119,7 +143,7 @@ func GetDBMetricsTodayRaw(ctx context.Context, db *gorm.DB, projectID int, now t
 	start := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
 	var activeSources []string
-	if db.Migrator().HasTable(model.Log{}.TableName()) {
+	if tableExists(db, model.Log{}.TableName()) {
 		if err := db.WithContext(ctx).Table(model.Log{}.TableName()).
 			Where("project_id = ? AND timestamp >= ? AND timestamp < ?", projectID, start, end).
 			Count(&out.Logs).Error; err != nil {
@@ -139,7 +163,7 @@ func GetDBMetricsTodayRaw(ctx context.Context, db *gorm.DB, projectID int, now t
 		}
 		activeSources = append(activeSources, model.Log{}.TableName())
 	}
-	if db.Migrator().HasTable(model.Event{}.TableName()) {
+	if tableExists(db, model.Event{}.TableName()) {
 		var events int64
 		if err := db.WithContext(ctx).Table(model.Event{}.TableName()).
 			Where("project_id = ? AND timestamp >= ? AND timestamp < ?", projectID, start, end).
@@ -156,7 +180,7 @@ func GetDBMetricsTodayRaw(ctx context.Context, db *gorm.DB, projectID int, now t
 		out.Errors += errorsCount
 		activeSources = append(activeSources, model.Event{}.TableName())
 	}
-	if db.Migrator().HasTable(model.TrackEvent{}.TableName()) {
+	if tableExists(db, model.TrackEvent{}.TableName()) {
 		var events int64
 		if err := db.WithContext(ctx).Table(model.TrackEvent{}.TableName()).
 			Where("project_id = ? AND timestamp >= ? AND timestamp < ?", projectID, start, end).
@@ -180,7 +204,8 @@ func GetDBMetricsTotal(ctx context.Context, db *gorm.DB, projectID int) (Metrics
 	if db == nil || projectID <= 0 {
 		return out, false, nil
 	}
-	if db.Migrator().HasTable(model.ProjectCounter{}.TableName()) {
+	hasCounters := false
+	if tableExists(db, model.ProjectCounter{}.TableName()) {
 		type row struct {
 			Metric string `gorm:"column:metric"`
 			Value  int64  `gorm:"column:value"`
@@ -196,21 +221,30 @@ func GetDBMetricsTotal(ctx context.Context, db *gorm.DB, projectID int) (Metrics
 			switch row.Metric {
 			case CounterLogsTotal:
 				out.Logs = row.Value
+				hasCounters = true
 			case CounterEventsTotal:
 				out.Events = row.Value
+				hasCounters = true
 			}
 		}
 	}
-	if db.Migrator().HasTable(model.UserFirstSeen{}.TableName()) {
+	if tableExists(db, model.UserFirstSeen{}.TableName()) {
 		if err := db.WithContext(ctx).Table(model.UserFirstSeen{}.TableName()).
 			Where("project_id = ?", projectID).
 			Count(&out.Users).Error; err != nil {
 			return out, true, err
 		}
 	}
+	// Counters are backfilled from raw tables at startup and maintained by
+	// every ingest path, so they are authoritative whenever present. Only
+	// fall back to full-table COUNT scans when a project has no counter
+	// rows at all (pre-rollup legacy data).
+	if hasCounters {
+		return out, true, nil
+	}
 	raw, rawOK, err := GetDBMetricsTotalRaw(ctx, db, projectID)
 	if err != nil || !rawOK {
-		return out, rawOK || db.Migrator().HasTable(model.ProjectCounter{}.TableName()), err
+		return out, rawOK || tableExists(db, model.ProjectCounter{}.TableName()), err
 	}
 	if raw.Logs > out.Logs {
 		out.Logs = raw.Logs
@@ -230,7 +264,7 @@ func GetDBMetricsTotalRaw(ctx context.Context, db *gorm.DB, projectID int) (Metr
 		return out, false, nil
 	}
 	var activeSources []string
-	if db.Migrator().HasTable(model.Log{}.TableName()) {
+	if tableExists(db, model.Log{}.TableName()) {
 		if err := db.WithContext(ctx).Table(model.Log{}.TableName()).Where("project_id = ?", projectID).Count(&out.Logs).Error; err != nil {
 			return out, true, err
 		}
@@ -241,7 +275,7 @@ func GetDBMetricsTotalRaw(ctx context.Context, db *gorm.DB, projectID int) (Metr
 		out.Events = logEvents
 		activeSources = append(activeSources, model.Log{}.TableName())
 	}
-	if db.Migrator().HasTable(model.Event{}.TableName()) {
+	if tableExists(db, model.Event{}.TableName()) {
 		var events int64
 		if err := db.WithContext(ctx).Table(model.Event{}.TableName()).Where("project_id = ?", projectID).Count(&events).Error; err != nil {
 			return out, true, err
@@ -249,7 +283,7 @@ func GetDBMetricsTotalRaw(ctx context.Context, db *gorm.DB, projectID int) (Metr
 		out.Events += events
 		activeSources = append(activeSources, model.Event{}.TableName())
 	}
-	if db.Migrator().HasTable(model.TrackEvent{}.TableName()) {
+	if tableExists(db, model.TrackEvent{}.TableName()) {
 		var events int64
 		if err := db.WithContext(ctx).Table(model.TrackEvent{}.TableName()).Where("project_id = ?", projectID).Count(&events).Error; err != nil {
 			return out, true, err
