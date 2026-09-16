@@ -206,6 +206,142 @@ func SearchLogsHandler(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// LogTrendHandler serves pre-aggregated log counts per hour/day bucket plus
+// the top messages, so dashboards need one cheap aggregate request instead of
+// one full-payload search per bucket.
+// GET /api/:projectId/logs/trend?level=error&bucket=hour|day&start=RFC3339&end=RFC3339&top=10
+func LogTrendHandler(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if db == nil {
+			respondErr(c, http.StatusNotImplemented, "database not configured")
+			return
+		}
+		projectID, err := project.ParseID(c.Param("projectId"))
+		if err != nil {
+			respondErr(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		level := strings.TrimSpace(c.Query("level"))
+		if level == "" {
+			level = "error"
+		}
+		bucket := strings.ToLower(strings.TrimSpace(c.Query("bucket")))
+		if bucket != "day" {
+			bucket = "hour"
+		}
+		top := parseLimit(c.Query("top"), 10, 50)
+
+		now := time.Now().UTC()
+		start, okStart := parseTime(c.Query("start"))
+		end, okEnd := parseTime(c.Query("end"))
+		if !okEnd {
+			end = now
+		}
+		if !okStart {
+			if bucket == "day" {
+				start = end.AddDate(0, 0, -6)
+			} else {
+				start = end.Add(-24 * time.Hour)
+			}
+		}
+		if end.Before(start) {
+			start, end = end, start
+		}
+		// Bound the number of buckets per request.
+		if maxStart := end.Add(-30 * 24 * time.Hour); start.Before(maxStart) {
+			start = maxStart
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+		defer cancel()
+
+		bucketExpr := logTrendBucketExpr(db, bucket)
+		type trendRow struct {
+			Bucket string `gorm:"column:bucket"`
+			Count  int64  `gorm:"column:count"`
+		}
+		var rows []trendRow
+		if err := db.WithContext(ctx).Model(&model.Log{}).
+			Select(bucketExpr+" AS bucket, COUNT(*) AS count").
+			Where("project_id = ? AND level = ? AND timestamp >= ? AND timestamp < ?", projectID, level, start, end).
+			Group("bucket").
+			Find(&rows).Error; err != nil {
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+
+		counts := make(map[string]int64, len(rows))
+		for _, r := range rows {
+			counts[r.Bucket] = r.Count
+		}
+		step := time.Hour
+		if bucket == "day" {
+			step = 24 * time.Hour
+		}
+		bucketStart := start.Truncate(step)
+		var points []int64
+		var labels []string
+		for t := bucketStart; t.Before(end); t = t.Add(step) {
+			label := bucketLabel(t, bucket)
+			points = append(points, counts[label])
+			labels = append(labels, label)
+		}
+
+		type topRow struct {
+			Message string `gorm:"column:message"`
+			Count   int64  `gorm:"column:count"`
+		}
+		var topRows []topRow
+		if err := db.WithContext(ctx).Model(&model.Log{}).
+			Select("substr(coalesce(message,''), 1, 80) AS message, COUNT(*) AS count").
+			Where("project_id = ? AND level = ? AND timestamp >= ? AND timestamp < ?", projectID, level, start, end).
+			Group("message").
+			Order("count DESC").
+			Limit(top).
+			Find(&topRows).Error; err != nil {
+			respondErr(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		topItems := make([]map[string]any, 0, len(topRows))
+		for _, r := range topRows {
+			topItems = append(topItems, gin.H{"message": r.Message, "count": r.Count})
+		}
+
+		respondOK(c, gin.H{
+			"project_id": projectID,
+			"level":      level,
+			"bucket":     bucket,
+			"start":      start.UTC().Format(time.RFC3339),
+			"end":        end.UTC().Format(time.RFC3339),
+			"labels":     labels,
+			"points":     points,
+			"top":        topItems,
+		})
+	}
+}
+
+func logTrendBucketExpr(db *gorm.DB, bucket string) string {
+	isPG := strings.EqualFold(db.Dialector.Name(), "postgres")
+	if bucket == "day" {
+		if isPG {
+			return "to_char(date_trunc('day', timestamp), 'YYYY-MM-DD\"T\"00:00:00\"Z\"')"
+		}
+		return "strftime('%Y-%m-%dT00:00:00Z', timestamp)"
+	}
+	if isPG {
+		return "to_char(date_trunc('hour', timestamp), 'YYYY-MM-DD\"T\"HH24:00:00\"Z\"')"
+	}
+	return "strftime('%Y-%m-%dT%H:00:00Z', timestamp)"
+}
+
+func bucketLabel(t time.Time, bucket string) string {
+	if bucket == "day" {
+		return t.UTC().Format("2006-01-02T00:00:00Z")
+	}
+	return t.UTC().Format("2006-01-02T15:00:00Z")
+}
+
 func parseTime(s string) (time.Time, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {

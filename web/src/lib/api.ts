@@ -1071,6 +1071,37 @@ export async function searchLogs(
   );
 }
 
+export type LogTrendResponse = {
+  project_id: number;
+  level: string;
+  bucket: string;
+  labels: string[];
+  points: number[];
+  top: { message: string; count: number }[];
+};
+
+export async function getLogTrend(
+  s: ApiSettings,
+  params: {
+    level?: string;
+    bucket?: "hour" | "day";
+    start?: string;
+    end?: string;
+    top?: number;
+  },
+): Promise<LogTrendResponse> {
+  const usp = new URLSearchParams();
+  if (params.level) usp.set("level", params.level);
+  if (params.bucket) usp.set("bucket", params.bucket);
+  if (params.start) usp.set("start", params.start);
+  if (params.end) usp.set("end", params.end);
+  if (params.top) usp.set("top", String(params.top));
+  return fetchJSON(
+    `${s.apiBase}/api/${s.projectId}/logs/trend?${usp.toString()}`,
+    s.token,
+  );
+}
+
 export async function login(
   apiBase: string,
   email: string,

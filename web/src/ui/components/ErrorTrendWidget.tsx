@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { searchLogs, type LogRow } from "../../lib/api";
+import { getLogTrend } from "../../lib/api";
 import { Sparkline } from "./Sparkline";
 import type { WidgetProps } from "../widgets/registry";
 
@@ -18,42 +18,20 @@ export function ErrorTrendWidget(props: WidgetProps) {
     let cancelled = false;
     (async () => {
       try {
-        const end = new Date();
-        const buckets: number[] = [];
-        const errors: Map<string, number> = new Map();
-        const bucketCount = range === "24h" ? 24 : 7;
-        const bucketMs = range === "24h" ? 3600000 : 24 * 3600000;
-
-        for (let i = bucketCount - 1; i >= 0; i--) {
-          const bucketEnd = new Date(end.getTime() - i * bucketMs);
-          const bucketStart = new Date(bucketEnd.getTime() - bucketMs);
-          try {
-            const rows: LogRow[] = await searchLogs(settings, {
-              level: "error",
-              start: bucketStart.toISOString(),
-              end: bucketEnd.toISOString(),
-              limit: 1000,
-            });
-            if (cancelled) return;
-            buckets.push(rows.length);
-            for (const r of rows) {
-              const key = r.message?.slice(0, 80) || "(empty)";
-              errors.set(key, (errors.get(key) || 0) + 1);
-            }
-          } catch {
-            buckets.push(0);
-          }
-        }
-
-        if (!cancelled) {
-          setPoints(buckets);
-          setTopErrors(
-            Array.from(errors.entries())
-              .sort((a, b) => b[1] - a[1])
-              .slice(0, 10)
-              .map(([msg, count]) => ({ msg, count })),
-          );
-        }
+        // One aggregate request instead of one full-payload search per
+        // bucket; counts come from the server so they never cap at a page
+        // size.
+        const res = await getLogTrend(settings, {
+          level: "error",
+          bucket: range === "24h" ? "hour" : "day",
+        });
+        if (cancelled) return;
+        setPoints(res.points ?? []);
+        setTopErrors(
+          (res.top ?? [])
+            .filter((t) => (t.count ?? 0) > 0)
+            .map((t) => ({ msg: t.message || "(empty)", count: t.count })),
+        );
       } catch {}
     })();
     return () => {
