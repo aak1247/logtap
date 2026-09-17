@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"expvar"
+	"log"
 	"net/http"
 	"net/http/pprof"
 	"strings"
@@ -28,6 +29,7 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 	router.Use(corsMiddleware())
 	router.Use(maintenanceMiddleware(cfg.MaintenanceMode))
 	router.Use(errorLogMiddleware())
+	router.Use(bodyLimitMiddleware())
 	if stats != nil {
 		router.Use(observabilityMiddleware(stats))
 	}
@@ -49,6 +51,9 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 	router.GET("/healthz", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	authEnabled := db != nil && len(cfg.AuthSecret) > 0
+	if db != nil && !authEnabled {
+		log.Println("WARNING: AUTH_SECRET is unset; the query API is unauthenticated and any caller can read every project. Set AUTH_SECRET before exposing this service beyond localhost.")
+	}
 	trustedProxyEnabled := strings.TrimSpace(cfg.LogtapProxySecret) != ""
 
 	apiRoot := router.Group("/api")

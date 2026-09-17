@@ -106,3 +106,18 @@ func maintenanceMiddleware(enabled bool) gin.HandlerFunc {
 		}
 	}
 }
+
+// maxRequestBodyBytes caps every request body at the HTTP layer. It sits
+// above the 20MiB ingest cap so ingest limits stay authoritative, but stops
+// console endpoints (which had no limit of their own) from being used to
+// OOM the process with giant JSON bodies.
+const maxRequestBodyBytes int64 = 25 << 20
+
+func bodyLimitMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRequestBodyBytes)
+		}
+		c.Next()
+	}
+}
