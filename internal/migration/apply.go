@@ -257,7 +257,7 @@ func applyLogs(ctx context.Context, tx *gorm.DB, sourceProjectID int, targetProj
 			Message: r.Message, Fields: datatypes.JSON(rawDefault(r.Fields, "{}")),
 		})
 	}
-	if err := store.InsertLogsAndTrackEventsBatch(ctx, tx, logs); err != nil {
+	if _, err := store.InsertLogsAndTrackEventsBatch(ctx, tx, logs); err != nil {
 		return err
 	}
 	res.Inserted["logs"] += int64(len(logs))
@@ -277,7 +277,7 @@ func applyEvents(ctx context.Context, tx *gorm.DB, targetProjectID int, rows []E
 			Data: datatypes.JSON(rawDefault(r.Data, "{}")),
 		})
 	}
-	if err := store.InsertEventsBatch(ctx, tx, events); err != nil {
+	if _, err := store.InsertEventsBatch(ctx, tx, events); err != nil {
 		return err
 	}
 	res.Inserted["events"] += int64(len(events))

@@ -139,15 +139,15 @@ func TestInsertLogsAndTrackEventsBatch_IdempotentRollup(t *testing.T) {
 		Message:    "signup",
 	}
 
-	if err := InsertLogsAndTrackEventsBatch(ctx, db, []model.Log{logRow}); err != nil {
+	if _, err := InsertLogsAndTrackEventsBatch(ctx, db, []model.Log{logRow}); err != nil {
 		t.Fatalf("insert batch1: %v", err)
 	}
-	if err := InsertLogsAndTrackEventsBatch(ctx, db, []model.Log{logRow}); err != nil {
+	if _, err := InsertLogsAndTrackEventsBatch(ctx, db, []model.Log{logRow}); err != nil {
 		t.Fatalf("insert batch2: %v", err)
 	}
 	retryWithDifferentTimestamp := logRow
 	retryWithDifferentTimestamp.Timestamp = ts.Add(time.Minute)
-	if err := InsertLogsAndTrackEventsBatch(ctx, db, []model.Log{retryWithDifferentTimestamp}); err != nil {
+	if _, err := InsertLogsAndTrackEventsBatch(ctx, db, []model.Log{retryWithDifferentTimestamp}); err != nil {
 		t.Fatalf("insert batch3: %v", err)
 	}
 

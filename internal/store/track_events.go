@@ -61,11 +61,16 @@ func InsertTrackEventsAndRollupBatch(ctx context.Context, db *gorm.DB, rows []mo
 	return insertTrackEventsAndRollupBestEffort(ctx, db, rows)
 }
 
-func InsertLogsAndTrackEventsBatch(ctx context.Context, db *gorm.DB, logs []model.Log) error {
+// InsertLogsAndTrackEventsBatch inserts logs (plus derived track events)
+// idempotently and returns the logs that were new (passed the existence
+// filter), so callers can trigger per-row side effects such as alert
+// evaluation without a separate existence query.
+func InsertLogsAndTrackEventsBatch(ctx context.Context, db *gorm.DB, logs []model.Log) ([]model.Log, error) {
 	if db == nil || len(logs) == 0 {
-		return nil
+		return nil, nil
 	}
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var kept []model.Log
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := lockLogIngestIDs(ctx, tx, logs); err != nil {
 			return err
 		}
@@ -93,8 +98,13 @@ func InsertLogsAndTrackEventsBatch(ctx context.Context, db *gorm.DB, logs []mode
 				return err
 			}
 		}
+		kept = newLogs
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return kept, nil
 }
 
 func lockLogIngestIDs(ctx context.Context, db *gorm.DB, logs []model.Log) error {

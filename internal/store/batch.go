@@ -35,11 +35,15 @@ func InsertLogsBatch(ctx context.Context, db *gorm.DB, rows []model.Log) error {
 	return UpsertLogMetricsFromLogs(ctx, db, newRows)
 }
 
-func InsertEventsBatch(ctx context.Context, db *gorm.DB, rows []model.Event) error {
+// InsertEventsBatch inserts rows idempotently and returns the rows that were
+// new (passed the existence filter), so callers can trigger per-row side
+// effects such as alert evaluation without a separate existence query.
+func InsertEventsBatch(ctx context.Context, db *gorm.DB, rows []model.Event) ([]model.Event, error) {
 	if db == nil || len(rows) == 0 {
-		return nil
+		return nil, nil
 	}
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var kept []model.Event
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := lockEventIDs(ctx, tx, rows); err != nil {
 			return err
 		}
@@ -58,8 +62,16 @@ func InsertEventsBatch(ctx context.Context, db *gorm.DB, rows []model.Event) err
 		if err := UpsertUserFirstSeenFromEvents(ctx, tx, newRows); err != nil {
 			return err
 		}
-		return UpsertEventMetricsFromEvents(ctx, tx, newRows)
+		if err := UpsertEventMetricsFromEvents(ctx, tx, newRows); err != nil {
+			return err
+		}
+		kept = newRows
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return kept, nil
 }
 
 func lockEventIDs(ctx context.Context, db *gorm.DB, rows []model.Event) error {

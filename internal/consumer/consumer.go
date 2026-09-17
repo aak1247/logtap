@@ -144,16 +144,12 @@ func handleEventMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisR
 
 	batcher := NewBatcher[model.Event](cfg.DBEventBatchSize, cfg.DBEventFlushInterval, 5*time.Second, func(ctx context.Context, rows []model.Event) error {
 		start := time.Now()
-		existing := existingEventIDs(ctx, db, rows)
-		err := store.InsertEventsBatch(ctx, db, rows)
+		kept, err := store.InsertEventsBatch(ctx, db, rows)
 		if stats != nil {
 			stats.ObserveDBFlush(len(rows), time.Since(start), err)
 		}
 		if err == nil && evaluator != nil {
-			for _, r := range rows {
-				if existing[r.ID] {
-					continue
-				}
+			for _, r := range kept {
 				evaluator.Submit(alert.InputFromEvent(r))
 			}
 		}
@@ -260,16 +256,12 @@ func handleLogMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisRec
 
 	batcher := NewBatcher[model.Log](cfg.DBLogBatchSize, cfg.DBLogFlushInterval, 5*time.Second, func(ctx context.Context, rows []model.Log) error {
 		start := time.Now()
-		existing := existingLogIngestIDs(ctx, db, rows)
-		err := store.InsertLogsAndTrackEventsBatch(ctx, db, rows)
+		kept, err := store.InsertLogsAndTrackEventsBatch(ctx, db, rows)
 		if stats != nil {
 			stats.ObserveDBFlush(len(rows), time.Since(start), err)
 		}
 		if err == nil && evaluator != nil {
-			for _, r := range rows {
-				if r.IngestID != nil && existing[r.ProjectID] != nil && existing[r.ProjectID][*r.IngestID] {
-					continue
-				}
+			for _, r := range kept {
 				evaluator.Submit(alert.InputFromLog(r))
 			}
 		}
@@ -350,79 +342,4 @@ func handleLogMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisRec
 				evaluator.Stop()
 			}
 		}
-}
-
-func existingEventIDs(ctx context.Context, db *gorm.DB, rows []model.Event) map[uuid.UUID]bool {
-	out := map[uuid.UUID]bool{}
-	if db == nil || len(rows) == 0 {
-		return out
-	}
-	uniq := make(map[uuid.UUID]struct{}, len(rows))
-	for _, r := range rows {
-		if r.ID != uuid.Nil {
-			uniq[r.ID] = struct{}{}
-		}
-	}
-	if len(uniq) == 0 {
-		return out
-	}
-	ids := make([]uuid.UUID, 0, len(uniq))
-	for id := range uniq {
-		ids = append(ids, id)
-	}
-	type row struct {
-		ID uuid.UUID `gorm:"column:id"`
-	}
-	var found []row
-	_ = db.WithContext(ctx).
-		Model(&model.Event{}).
-		Select("id").
-		Where("id IN ?", ids).
-		Scan(&found).Error
-	for _, f := range found {
-		out[f.ID] = true
-	}
-	return out
-}
-
-func existingLogIngestIDs(ctx context.Context, db *gorm.DB, rows []model.Log) map[int]map[uuid.UUID]bool {
-	out := map[int]map[uuid.UUID]bool{}
-	if db == nil || len(rows) == 0 {
-		return out
-	}
-
-	byProject := map[int]map[uuid.UUID]struct{}{}
-	for _, r := range rows {
-		if r.ProjectID <= 0 || r.IngestID == nil || *r.IngestID == uuid.Nil {
-			continue
-		}
-		if byProject[r.ProjectID] == nil {
-			byProject[r.ProjectID] = map[uuid.UUID]struct{}{}
-		}
-		byProject[r.ProjectID][*r.IngestID] = struct{}{}
-	}
-
-	for pid, set := range byProject {
-		ids := make([]uuid.UUID, 0, len(set))
-		for id := range set {
-			ids = append(ids, id)
-		}
-		type row struct {
-			IngestID uuid.UUID `gorm:"column:ingest_id"`
-		}
-		var found []row
-		_ = db.WithContext(ctx).
-			Model(&model.Log{}).
-			Select("ingest_id").
-			Where("project_id = ? AND ingest_id IN ?", pid, ids).
-			Scan(&found).Error
-
-		m := map[uuid.UUID]bool{}
-		for _, f := range found {
-			m[f.IngestID] = true
-		}
-		out[pid] = m
-	}
-
-	return out
 }
