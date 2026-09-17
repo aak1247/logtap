@@ -88,7 +88,7 @@ func topEventsFromTrackEventDailyOnly(
 	if projectID <= 0 {
 		return nil, gorm.ErrInvalidData
 	}
-	if !db.Migrator().HasTable("track_event_daily") {
+	if !store.TableExists(db, "track_event_daily") {
 		return nil, fmt.Errorf("rollup table missing")
 	}
 
@@ -135,7 +135,7 @@ func topEventsFromTrackEvents(ctx context.Context, db *gorm.DB, projectID int, s
 	if projectID <= 0 {
 		return gorm.ErrInvalidData
 	}
-	if !db.Migrator().HasTable("track_events") {
+	if !store.TableExists(db, "track_events") {
 		return fmt.Errorf("track_events unavailable")
 	}
 
@@ -176,7 +176,7 @@ func topEventsFromTrackEventsWithDailyRollup(
 		return nil, gorm.ErrInvalidData
 	}
 
-	if !db.Migrator().HasTable("track_event_daily") {
+	if !store.TableExists(db, "track_event_daily") {
 		return nil, fmt.Errorf("rollup table missing")
 	}
 
@@ -703,7 +703,7 @@ func userGrowthFromDB(ctx context.Context, db *gorm.DB, projectID int, start, en
 		start, end = end, start
 	}
 
-	if db.Migrator().HasTable("user_first_seen") {
+	if store.TableExists(db, "user_first_seen") {
 		return userGrowthFromFirstSeen(ctx, db, projectID, start, end)
 	}
 	return userGrowthFromRawEvents(ctx, db, projectID, start, end)
@@ -732,8 +732,8 @@ func userGrowthFromFirstSeen(ctx context.Context, db *gorm.DB, projectID int, st
 }
 
 func userGrowthFromRawEvents(ctx context.Context, db *gorm.DB, projectID int, start, end time.Time) ([]UserGrowthPoint, int64, error) {
-	hasLogs := db.Migrator().HasTable("logs")
-	hasTrackEvents := db.Migrator().HasTable("track_events")
+	hasLogs := store.TableExists(db, "logs")
+	hasTrackEvents := store.TableExists(db, "track_events")
 	if !hasLogs && !hasTrackEvents {
 		return nil, 0, fmt.Errorf("logs/track_events unavailable")
 	}

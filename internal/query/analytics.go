@@ -9,6 +9,7 @@ import (
 
 	"github.com/aak1247/logtap/internal/metrics"
 	"github.com/aak1247/logtap/internal/project"
+	"github.com/aak1247/logtap/internal/store"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -239,7 +240,7 @@ func activeDBSources(db *gorm.DB) []string {
 	}
 	var sources []string
 	for _, table := range []string{"logs", "events", "track_events"} {
-		if db.Migrator().HasTable(table) {
+		if store.TableExists(db, table) {
 			sources = append(sources, table)
 		}
 	}

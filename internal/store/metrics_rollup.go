@@ -22,7 +22,11 @@ type tableExistKey struct {
 	table string
 }
 
-func tableExists(db *gorm.DB, table string) bool {
+// TableExists reports whether the table exists, caching the answer per
+// *gorm.DB to avoid an information_schema round trip on hot query paths.
+// Schema is created during startup migrations, so results are stable for
+// the life of a database handle.
+func TableExists(db *gorm.DB, table string) bool {
 	if db == nil {
 		return false
 	}
@@ -92,7 +96,7 @@ func GetDBMetricsToday(ctx context.Context, db *gorm.DB, projectID int, now time
 		return out, false, nil
 	}
 	day := now.UTC().Format("2006-01-02")
-	if tableExists(db, model.LogDailyStat{}.TableName()) {
+	if TableExists(db, model.LogDailyStat{}.TableName()) {
 		type row struct {
 			Kind  string `gorm:"column:kind"`
 			Level string `gorm:"column:level"`
@@ -120,7 +124,7 @@ func GetDBMetricsToday(ctx context.Context, db *gorm.DB, projectID int, now time
 
 	raw, rawOK, err := GetDBMetricsTodayRaw(ctx, db, projectID, now)
 	if err != nil || !rawOK {
-		return out, rawOK || tableExists(db, model.LogDailyStat{}.TableName()), err
+		return out, rawOK || TableExists(db, model.LogDailyStat{}.TableName()), err
 	}
 	if raw.Logs > out.Logs {
 		out.Logs = raw.Logs
@@ -143,7 +147,7 @@ func GetDBMetricsTodayRaw(ctx context.Context, db *gorm.DB, projectID int, now t
 	start := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
 	var activeSources []string
-	if tableExists(db, model.Log{}.TableName()) {
+	if TableExists(db, model.Log{}.TableName()) {
 		if err := db.WithContext(ctx).Table(model.Log{}.TableName()).
 			Where("project_id = ? AND timestamp >= ? AND timestamp < ?", projectID, start, end).
 			Count(&out.Logs).Error; err != nil {
@@ -163,7 +167,7 @@ func GetDBMetricsTodayRaw(ctx context.Context, db *gorm.DB, projectID int, now t
 		}
 		activeSources = append(activeSources, model.Log{}.TableName())
 	}
-	if tableExists(db, model.Event{}.TableName()) {
+	if TableExists(db, model.Event{}.TableName()) {
 		var events int64
 		if err := db.WithContext(ctx).Table(model.Event{}.TableName()).
 			Where("project_id = ? AND timestamp >= ? AND timestamp < ?", projectID, start, end).
@@ -180,7 +184,7 @@ func GetDBMetricsTodayRaw(ctx context.Context, db *gorm.DB, projectID int, now t
 		out.Errors += errorsCount
 		activeSources = append(activeSources, model.Event{}.TableName())
 	}
-	if tableExists(db, model.TrackEvent{}.TableName()) {
+	if TableExists(db, model.TrackEvent{}.TableName()) {
 		var events int64
 		if err := db.WithContext(ctx).Table(model.TrackEvent{}.TableName()).
 			Where("project_id = ? AND timestamp >= ? AND timestamp < ?", projectID, start, end).
@@ -205,7 +209,7 @@ func GetDBMetricsTotal(ctx context.Context, db *gorm.DB, projectID int) (Metrics
 		return out, false, nil
 	}
 	hasCounters := false
-	if tableExists(db, model.ProjectCounter{}.TableName()) {
+	if TableExists(db, model.ProjectCounter{}.TableName()) {
 		type row struct {
 			Metric string `gorm:"column:metric"`
 			Value  int64  `gorm:"column:value"`
@@ -228,7 +232,7 @@ func GetDBMetricsTotal(ctx context.Context, db *gorm.DB, projectID int) (Metrics
 			}
 		}
 	}
-	if tableExists(db, model.UserFirstSeen{}.TableName()) {
+	if TableExists(db, model.UserFirstSeen{}.TableName()) {
 		if err := db.WithContext(ctx).Table(model.UserFirstSeen{}.TableName()).
 			Where("project_id = ?", projectID).
 			Count(&out.Users).Error; err != nil {
@@ -244,7 +248,7 @@ func GetDBMetricsTotal(ctx context.Context, db *gorm.DB, projectID int) (Metrics
 	}
 	raw, rawOK, err := GetDBMetricsTotalRaw(ctx, db, projectID)
 	if err != nil || !rawOK {
-		return out, rawOK || tableExists(db, model.ProjectCounter{}.TableName()), err
+		return out, rawOK || TableExists(db, model.ProjectCounter{}.TableName()), err
 	}
 	if raw.Logs > out.Logs {
 		out.Logs = raw.Logs
@@ -264,7 +268,7 @@ func GetDBMetricsTotalRaw(ctx context.Context, db *gorm.DB, projectID int) (Metr
 		return out, false, nil
 	}
 	var activeSources []string
-	if tableExists(db, model.Log{}.TableName()) {
+	if TableExists(db, model.Log{}.TableName()) {
 		if err := db.WithContext(ctx).Table(model.Log{}.TableName()).Where("project_id = ?", projectID).Count(&out.Logs).Error; err != nil {
 			return out, true, err
 		}
@@ -275,7 +279,7 @@ func GetDBMetricsTotalRaw(ctx context.Context, db *gorm.DB, projectID int) (Metr
 		out.Events = logEvents
 		activeSources = append(activeSources, model.Log{}.TableName())
 	}
-	if tableExists(db, model.Event{}.TableName()) {
+	if TableExists(db, model.Event{}.TableName()) {
 		var events int64
 		if err := db.WithContext(ctx).Table(model.Event{}.TableName()).Where("project_id = ?", projectID).Count(&events).Error; err != nil {
 			return out, true, err
@@ -283,7 +287,7 @@ func GetDBMetricsTotalRaw(ctx context.Context, db *gorm.DB, projectID int) (Metr
 		out.Events += events
 		activeSources = append(activeSources, model.Event{}.TableName())
 	}
-	if tableExists(db, model.TrackEvent{}.TableName()) {
+	if TableExists(db, model.TrackEvent{}.TableName()) {
 		var events int64
 		if err := db.WithContext(ctx).Table(model.TrackEvent{}.TableName()).Where("project_id = ?", projectID).Count(&events).Error; err != nil {
 			return out, true, err

@@ -169,10 +169,29 @@ func RunCleanupPolicyHandler(db *gorm.DB) gin.HandlerFunc {
 		var eventsBefore string
 		var trackEventsBefore string
 
+		// Batched deletes keep transactions short on big projects; the
+		// single-statement variants lock the whole range and blow the
+		// request deadline.
+		drain := func(delete func(ctx context.Context, before time.Time, batchSize int) (int64, error), before time.Time) (int64, error) {
+			var total int64
+			for {
+				n, err := delete(ctx, before, 5000)
+				if err != nil {
+					return total, err
+				}
+				total += n
+				if n == 0 || ctx.Err() != nil {
+					return total, nil
+				}
+			}
+		}
+
 		if policy.LogsRetentionDays > 0 {
 			before := now.Add(-time.Duration(policy.LogsRetentionDays) * 24 * time.Hour)
 			logsBefore = before.Format(time.RFC3339)
-			n, err := store.DeleteLogsBefore(ctx, db, projectID, before)
+			n, err := drain(func(ctx context.Context, before time.Time, batchSize int) (int64, error) {
+				return store.DeleteLogsBeforeBatched(ctx, db, projectID, before, batchSize)
+			}, before)
 			if err != nil {
 				respondErr(c, http.StatusServiceUnavailable, err.Error())
 				return
@@ -182,7 +201,9 @@ func RunCleanupPolicyHandler(db *gorm.DB) gin.HandlerFunc {
 		if policy.EventsRetentionDays > 0 {
 			before := now.Add(-time.Duration(policy.EventsRetentionDays) * 24 * time.Hour)
 			eventsBefore = before.Format(time.RFC3339)
-			n, err := store.DeleteEventsBefore(ctx, db, projectID, before)
+			n, err := drain(func(ctx context.Context, before time.Time, batchSize int) (int64, error) {
+				return store.DeleteEventsBeforeBatched(ctx, db, projectID, before, batchSize)
+			}, before)
 			if err != nil {
 				respondErr(c, http.StatusServiceUnavailable, err.Error())
 				return
@@ -192,7 +213,9 @@ func RunCleanupPolicyHandler(db *gorm.DB) gin.HandlerFunc {
 		if policy.TrackEventsRetentionDays > 0 {
 			before := now.Add(-time.Duration(policy.TrackEventsRetentionDays) * 24 * time.Hour)
 			trackEventsBefore = before.Format(time.RFC3339)
-			n, err := store.DeleteTrackEventsBefore(ctx, db, projectID, before)
+			n, err := drain(func(ctx context.Context, before time.Time, batchSize int) (int64, error) {
+				return store.DeleteTrackEventsBeforeBatched(ctx, db, projectID, before, batchSize)
+			}, before)
 			if err != nil {
 				respondErr(c, http.StatusServiceUnavailable, err.Error())
 				return
