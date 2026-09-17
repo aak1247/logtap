@@ -88,6 +88,19 @@ func (b *Batcher[T]) Add(item T) error {
 func (b *Batcher[T]) loop() {
 	defer close(b.doneCh)
 
+	// Flusher goroutine keeps DB writes serialized while the loop keeps
+	// accumulating the next batch, so accumulation overlaps with the
+	// previous flush instead of stalling behind it. Add still waits for its
+	// own batch's flush result, preserving at-least-once ack semantics.
+	work := make(chan []batchReq[T])
+	flusherDone := make(chan struct{})
+	go func() {
+		defer close(flusherDone)
+		for items := range work {
+			b.runFlush(items)
+		}
+	}()
+
 	var (
 		batch       []batchReq[T]
 		timer       = time.NewTimer(b.flushInterval)
@@ -95,25 +108,6 @@ func (b *Batcher[T]) loop() {
 	)
 	if !timer.Stop() {
 		<-timer.C
-	}
-
-	flush := func(items []batchReq[T]) {
-		if len(items) == 0 {
-			return
-		}
-		rows := make([]T, 0, len(items))
-		for _, it := range items {
-			rows = append(rows, it.item)
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), b.flushTimeout)
-		err := b.flush(ctx, rows)
-		cancel()
-
-		for _, it := range items {
-			it.done <- err
-			close(it.done)
-		}
 	}
 
 	stopTimer := func() {
@@ -137,6 +131,18 @@ func (b *Batcher[T]) loop() {
 		timer.Reset(b.flushInterval)
 	}
 
+	dispatch := func() {
+		if len(batch) == 0 {
+			return
+		}
+		// Copy before handing off: the loop reuses batch's backing array
+		// while the flusher may still be draining the previous slice.
+		items := make([]batchReq[T], len(batch))
+		copy(items, batch)
+		work <- items
+		batch = batch[:0]
+	}
+
 	for {
 		var timerCh <-chan time.Time
 		if timerActive {
@@ -151,24 +157,46 @@ func (b *Batcher[T]) loop() {
 			batch = append(batch, req)
 			if len(batch) >= b.maxSize {
 				stopTimer()
-				flush(batch)
-				batch = batch[:0]
+				dispatch()
 			}
 		case <-timerCh:
 			stopTimer()
-			flush(batch)
-			batch = batch[:0]
+			dispatch()
 		case <-b.stopCh:
 			stopTimer()
 			for {
 				select {
 				case req := <-b.in:
 					batch = append(batch, req)
+					if len(batch) >= b.maxSize {
+						dispatch()
+					}
 				default:
-					flush(batch)
+					dispatch()
+					close(work)
+					<-flusherDone
 					return
 				}
 			}
 		}
+	}
+}
+
+func (b *Batcher[T]) runFlush(items []batchReq[T]) {
+	if len(items) == 0 {
+		return
+	}
+	rows := make([]T, 0, len(items))
+	for _, it := range items {
+		rows = append(rows, it.item)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), b.flushTimeout)
+	err := b.flush(ctx, rows)
+	cancel()
+
+	for _, it := range items {
+		it.done <- err
+		close(it.done)
 	}
 }
