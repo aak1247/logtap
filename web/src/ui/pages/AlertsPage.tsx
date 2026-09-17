@@ -281,14 +281,34 @@ export function AlertsPage() {
     }
   }
 
-  async function runMutation(successMessage: string, fn: () => Promise<void>) {
+  // Targeted refresh keys so a mutation only refetches the lists it can
+  // affect instead of all seven.
+  type RefreshKey = "contacts" | "groups" | "bots" | "endpoints" | "rules" | "deliveries";
+
+  async function refreshLists(keys: RefreshKey[]) {
+    const jobs: Array<Promise<void>> = [];
+    if (keys.includes("contacts"))
+      jobs.push(listAlertContacts(settings).then((r) => setContacts(r.items)));
+    if (keys.includes("groups"))
+      jobs.push(listAlertContactGroups(settings).then((r) => setGroups(r.items)));
+    if (keys.includes("bots"))
+      jobs.push(listAlertWecomBots(settings).then((r) => setWecomBots(r.items)));
+    if (keys.includes("endpoints"))
+      jobs.push(listAlertWebhookEndpoints(settings).then((r) => setWebhookEndpoints(r.items)));
+    if (keys.includes("rules"))
+      jobs.push(listAlertRules(settings).then((r) => setRules(r.items)));
+    if (keys.includes("deliveries")) jobs.push(refreshDeliveries());
+    await Promise.all(jobs);
+  }
+
+  async function runMutation(successMessage: string, fn: () => Promise<void>, refresh?: RefreshKey[]) {
     try {
       setBusy(successMessage);
       setErr("");
       setMsg("");
       await fn();
       setMsg(successMessage);
-      await loadAll();
+      await (refresh ? refreshLists(refresh) : loadAll());
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -408,7 +428,7 @@ export function AlertsPage() {
                       });
                       setNewContactName("");
                       setNewContactValue("");
-                    })
+                    }, ["contacts"])
                   }
                 >
                   创建
@@ -472,7 +492,7 @@ export function AlertsPage() {
                                         value: editContactValue,
                                       });
                                       setEditContactId(0);
-                                    })
+                                    }, ["contacts"])
                                   }
                                 >
                                   保存
@@ -500,7 +520,7 @@ export function AlertsPage() {
                                 void runMutation("联系人已删除", async () => {
                                   await deleteAlertContact(settings, c.id);
                                   if (editContactId === c.id) setEditContactId(0);
-                                });
+                                }, ["contacts"]);
                               }}
                             >
                               删除
@@ -559,7 +579,7 @@ export function AlertsPage() {
                       });
                       setNewGroupName("");
                       setNewGroupMemberIds([]);
-                    })
+                    }, ["groups"])
                   }
                 >
                   创建
@@ -632,7 +652,7 @@ export function AlertsPage() {
                                         memberContactIds: editGroupMemberIds,
                                       });
                                       setEditGroupId(0);
-                                    })
+                                    }, ["groups"])
                                   }
                                 >
                                   保存
@@ -660,7 +680,7 @@ export function AlertsPage() {
                                 void runMutation("联系人组已删除", async () => {
                                   await deleteAlertContactGroup(settings, g.id);
                                   if (editGroupId === g.id) setEditGroupId(0);
-                                });
+                                }, ["groups"]);
                               }}
                             >
                               删除
@@ -707,7 +727,7 @@ export function AlertsPage() {
                       });
                       setNewBotName("");
                       setNewBotWebhook("");
-                    })
+                    }, ["bots"])
                   }
                 >
                   创建
@@ -769,7 +789,7 @@ export function AlertsPage() {
                                         webhookUrl: editBotWebhook,
                                       });
                                       setEditBotId(0);
-                                    })
+                                    }, ["bots"])
                                   }
                                 >
                                   保存
@@ -791,7 +811,7 @@ export function AlertsPage() {
                                 void runMutation("WeCom Bot 已删除", async () => {
                                   await deleteAlertWecomBot(settings, b.id);
                                   if (editBotId === b.id) setEditBotId(0);
-                                });
+                                }, ["bots"]);
                               }}
                             >
                               删除
@@ -834,7 +854,7 @@ export function AlertsPage() {
                       });
                       setNewEndpointName("");
                       setNewEndpointURL("");
-                    })
+                    }, ["endpoints"])
                   }
                 >
                   创建
@@ -896,7 +916,7 @@ export function AlertsPage() {
                                         url: editEndpointURL,
                                       });
                                       setEditEndpointId(0);
-                                    })
+                                    }, ["endpoints"])
                                   }
                                 >
                                   保存
@@ -921,7 +941,7 @@ export function AlertsPage() {
                                 void runMutation("Webhook Endpoint 已删除", async () => {
                                   await deleteAlertWebhookEndpoint(settings, ep.id);
                                   if (editEndpointId === ep.id) setEditEndpointId(0);
-                                });
+                                }, ["endpoints"]);
                               }}
                             >
                               删除
@@ -971,7 +991,7 @@ export function AlertsPage() {
                 onClick={() =>
                   void runMutation("监控告警规则已创建", async () => {
                     await createAlertRule(settings, buildMonitorRulePayload(monitorRuleForm, monitors));
-                  })
+                  }, ["rules"])
                 }
               >
                 创建告警规则
@@ -1045,7 +1065,7 @@ export function AlertsPage() {
                   void runMutation("规则已创建", async () => {
                     await createAlertRule(settings, buildRulePayloadFromForm(newRuleForm));
                     resetRuleCreateDraft();
-                  })
+                  }, ["rules"])
                 }
               >
                 创建规则
@@ -1100,7 +1120,7 @@ export function AlertsPage() {
                                 void runMutation("规则已删除", async () => {
                                   await deleteAlertRule(settings, r.id);
                                   if (editRuleId === r.id) setEditRuleId(0);
-                                });
+                                }, ["rules"]);
                               }}
                             >
                               删除
@@ -1135,7 +1155,7 @@ export function AlertsPage() {
                                   void runMutation("规则已更新", async () => {
                                     await updateAlertRule(settings, r.id, buildRulePayloadFromForm(editRuleForm));
                                     setEditRuleId(0);
-                                  })
+                                  }, ["rules"])
                                 }
                               >
                                 保存
@@ -1193,7 +1213,7 @@ export function AlertsPage() {
                       fields: parseJSONObject("fields", testFieldsJSON),
                     });
                     setRulePreviewItems(res.items || []);
-                  })
+                  }, ["deliveries"])
                 }
               >
                 测试
@@ -1223,7 +1243,7 @@ export function AlertsPage() {
                               fields: parseJSONObject("fields", testFieldsJSON),
                             });
                             await refreshDeliveries();
-                          })
+                          }, ["deliveries"])
                         }
                       >
                         执行投递

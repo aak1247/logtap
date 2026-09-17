@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getActiveSeries,
   getCleanupPolicy,
@@ -92,11 +92,17 @@ export function AnalyticsPage() {
     }
   }, [settings.token, settings.projectId, nav]);
 
+  // The basic-tab dataset (active series, 5 distributions, retention,
+  // top events, user growth, cleanup policy) is only rendered on the basic
+  // tab; load it lazily on first visit instead of on every page mount.
+  const basicLoaded = useRef(false);
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        if (tab !== "basic" || basicLoaded.current) return;
         if (!settings.token || !settings.projectId) return;
+        basicLoaded.current = true;
         setErr("");
         setNotice("");
         let metricsUnavailable = false;
@@ -155,7 +161,7 @@ export function AnalyticsPage() {
     return () => {
       cancelled = true;
     };
-  }, [settings.apiBase, settings.projectId]);
+  }, [settings.apiBase, settings.projectId, tab]);
 
   useEffect(() => {
     const onChanged = () => setPluginViewsVersion((v) => v + 1);
