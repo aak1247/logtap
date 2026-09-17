@@ -2,6 +2,25 @@
 
 目标：提供一套可重复的写入压测脚本，用于比较优化前/后的吞吐与延迟。
 
+## 基准参考数据（2026-09）
+
+![基准参考画像](assets/benchmark-profile.svg)
+
+参考环境：**单机 all-in-one**（gateway、PostgreSQL 16/TimescaleDB、Redis 7、nsqd 1.2.1 同机），`DB_LOG_BATCH_SIZE=500`、flush 间隔 20ms，每请求 50 条日志，每点 3 轮 × 15s 取中位数，轮次之间等待 NSQ 队列完全排空。
+
+| 并发 (VUs) | 吞吐 (logs/s) | p50 | p95 | p99 |
+|---:|---:|---:|---:|---:|
+| 10 | 12,108 | 2ms | 317ms | 810ms |
+| 25 | 12,483 | 6ms | 466ms | 902ms |
+| 50 | 11,938 | 15ms | 951ms | 1,199ms |
+| 100 | 12,892 | 309ms | 1,037ms | 1,588ms |
+
+结论与注意事项（重要）：
+
+- 摄入吞吐在约 **12k–13k logs/s** 进入平台期，尾部延迟（p95/p99）随客户端并发上升。这是消费与摄入共享单机资源时的参考画像，不是分布式部署上限。
+- 测试宿主机为共享环境，**同版本单点波动可达 ±20–30%**。我们用「新旧版本逐点交替、配对比较」的方式做了多轮 A/B（含纯发布路径 `RUN_CONSUMERS=false` 的对照），差异始终落在波动范围内，因此本文档**只给出参考画像，不给出未经证实的优化前后百分比**。
+- 优化本身是代码路径层面的（可从 diff 直接验证）：消除每条消息的规则查询与 JSON 重解析、单语句批量 advisory lock、EXPIRE 并入打点 pipeline、批量落库与积累重叠、NSQ producer 连接池（8 连接轮询）等。要在受控环境复测，请使用下方工具并保证：独占宿主机、client 与 server 同机、每轮之间排空队列。记录时建议同时采集 `/debug/vars`（expvar：`alert_engine_*` 等）与 nsqd `/stats` 的 `timeout_count`。
+
 ## 依赖
 
 - 安装 `k6`：https://k6.io/docs/get-started/installation/

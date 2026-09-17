@@ -219,6 +219,21 @@ docker compose up --build
 |------|------|--------|
 | `DETECTOR_PLUGIN_DIRS` | 检测器插件目录列表，逗号/空格分隔。 | - |
 
+## 性能
+
+参考摄入画像（单机 all-in-one：gateway + PostgreSQL + Redis + nsqd 同机；每请求 50 条；每点 3 轮取中位数）：
+
+![摄入基准画像](docs/perf/assets/benchmark-profile.svg)
+
+| 客户端并发 | 吞吐 (logs/s) | p50 | p95 | p99 |
+|---:|---:|---:|---:|---:|
+| 10 | 12,108 | 2ms | 317ms | 810ms |
+| 25 | 12,483 | 6ms | 466ms | 902ms |
+| 50 | 11,938 | 15ms | 951ms | 1,199ms |
+| 100 | 12,892 | 309ms | 1,037ms | 1,588ms |
+
+摄入与消费共享单机时，吞吐在约 **12k–13k logs/s** 进入平台期，尾部延迟随客户端并发上升。这是共享单机的参考画像，不代表分布式部署上限——测试方法、原始数据与波动说明见 [`docs/perf/README.md`](docs/perf/README.md)。
+
 ## 文档
 
 - 项目概览：`docs/OVERVIEW.md`

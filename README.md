@@ -219,6 +219,21 @@ See `.env.example` for a complete example.
 |----------|-------------|---------|
 | `DETECTOR_PLUGIN_DIRS` | Detector plugin directories, comma/space separated. | - |
 
+## Performance
+
+Reference ingest profile (single all-in-one host: gateway + PostgreSQL + Redis + nsqd; batch=50; medians of 3 runs):
+
+![Ingest benchmark profile](docs/perf/assets/benchmark-profile.svg)
+
+| Client concurrency | Throughput (logs/s) | p50 | p95 | p99 |
+|---:|---:|---:|---:|---:|
+| 10 | 12,108 | 2ms | 317ms | 810ms |
+| 25 | 12,483 | 6ms | 466ms | 902ms |
+| 50 | 11,938 | 15ms | 951ms | 1,199ms |
+| 100 | 12,892 | 309ms | 1,037ms | 1,588ms |
+
+Throughput plateaus around 12k–13k logs/s while ingest and consumption share one host; tail latency grows with client concurrency. Treat this as a shared-host reference, not a distributed-deployment ceiling — methodology, raw data and variance notes live in [`docs/perf/README.md`](docs/perf/README.md).
+
 ## Documentation
 
 - Overview: `docs/OVERVIEW.md`
