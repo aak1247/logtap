@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/aak1247/logtap/internal/alert"
 	"github.com/aak1247/logtap/internal/detector"
 	"github.com/aak1247/logtap/internal/model"
+	"golang.org/x/sync/errgroup"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -78,15 +80,25 @@ func (w *Worker) RunOnce(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	processed := 0
+	processed := int64(0)
+	// Checks run concurrently: one hanging target (timeout up to 120s) must
+	// not delay every other monitor's schedule.
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(checkConcurrency)
 	for _, item := range items {
-		processed++
-		if err := w.executeOne(ctx, item); err != nil {
-			return processed, err
-		}
+		item := item
+		group.Go(func() error {
+			w.executeOne(groupCtx, item)
+			atomic.AddInt64(&processed, 1)
+			return nil
+		})
 	}
-	return processed, nil
+	_ = group.Wait()
+	return int(processed), nil
 }
+
+// checkConcurrency bounds parallel monitor checks per tick.
+const checkConcurrency = 8
 
 func (w *Worker) claimDue(ctx context.Context, now time.Time) ([]model.MonitorDefinition, error) {
 	limit := w.BatchSize

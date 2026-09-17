@@ -113,13 +113,10 @@ func (Plugin) Execute(ctx context.Context, req detector.ExecuteRequest) ([]detec
 		timeout = 5 * time.Second
 	}
 
-	baseTransport := http.DefaultTransport
-	if t, ok := baseTransport.(*http.Transport); ok {
-		clone := t.Clone()
-		clone.ResponseHeaderTimeout = timeout
-		baseTransport = clone
-	}
-	httpClient := &http.Client{Timeout: timeout, Transport: baseTransport}
+	// A shared transport keeps connections alive across checks; cloning one
+	// per execution meant a fresh TCP+TLS handshake for every monitor run.
+	// The per-request ceiling comes from client.Timeout, not the transport.
+	httpClient := &http.Client{Timeout: timeout, Transport: sharedHTTPTransport}
 
 	// Build request bound to the supplied context.
 	var body io.Reader
@@ -295,3 +292,12 @@ func AggregateWithStore(ctx context.Context, store *detector.ResultStore, projec
 		"success_rate": success,
 	}, nil
 }
+
+// sharedHTTPTransport is cloned once at package init so all http checks
+// reuse pooled connections instead of re-handshaking per execution.
+var sharedHTTPTransport http.RoundTripper = func() http.RoundTripper {
+	if t, ok := http.DefaultTransport.(*http.Transport); ok {
+		return t.Clone()
+	}
+	return http.DefaultTransport
+}()
