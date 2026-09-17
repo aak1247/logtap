@@ -173,9 +173,12 @@ func (a *PostgresAdapter) Search(ctx context.Context, q search.SearchQuery) (*se
 
 // applyFilter translates a Filter to a GORM where clause.
 func applyFilter(qdb *gorm.DB, f search.Filter) *gorm.DB {
-	col := f.Field
-	// Map common field names to DB columns
-	col = mapColumn(col)
+	// Identifiers come from user-typed DSL text, so only whitelisted fields
+	// may be interpolated into the statement; anything else matches nothing.
+	col, known := mapColumn(f.Field)
+	if !known {
+		return qdb.Where("1 = 0")
+	}
 
 	switch strings.ToLower(f.Operator) {
 	case "eq", "":
@@ -195,8 +198,10 @@ func applyFilter(qdb *gorm.DB, f search.Filter) *gorm.DB {
 	}
 }
 
-// mapColumn maps DSL field names to actual DB columns.
-func mapColumn(field string) string {
+// mapColumn maps DSL field names to actual DB columns. Only whitelisted
+// names are accepted; the fallback is a rejection, never the raw input
+// (identifiers cannot be parameterized, so they are injection surface).
+func mapColumn(field string) (string, bool) {
 	m := map[string]string{
 		"level":       "level",
 		"trace_id":    "trace_id",
@@ -208,11 +213,10 @@ func mapColumn(field string) string {
 		"service":     "fields->>'service'",
 		"tag":         "fields->>'tag'",
 	}
-	if mapped, ok := m[strings.ToLower(field)]; ok {
-		return mapped
+	if mapped, ok := m[strings.ToLower(strings.TrimSpace(field))]; ok {
+		return mapped, true
 	}
-	// Default: try as a direct column name
-	return field
+	return "", false
 }
 
 // highlightFields returns simple highlight snippets for keywords found in message.
