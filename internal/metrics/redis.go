@@ -109,8 +109,10 @@ func (r *RedisRecorder) ObserveEvent(ctx context.Context, projectID int, level s
 		pipe.PFAdd(ctx, devKey, deviceID)
 		expire[devKey] = r.dayTTL
 	}
+	// Expire rides in the same pipeline (commands run in order), halving
+	// the round trips per observed message.
+	expireKeysPiped(ctx, pipe, expire)
 	_, _ = pipe.Exec(ctx)
-	r.expireKeys(ctx, expire)
 }
 
 func (r *RedisRecorder) ObserveEventDist(ctx context.Context, projectID int, ts time.Time, distinctID string, dims map[string]string) {
@@ -136,8 +138,10 @@ func (r *RedisRecorder) ObserveEventDist(ctx context.Context, projectID int, ts 
 			expire[userKey] = r.distTTL
 		}
 	}
+	// Expire rides in the same pipeline (commands run in order), halving
+	// the round trips per observed message.
+	expireKeysPiped(ctx, pipe, expire)
 	_, _ = pipe.Exec(ctx)
-	r.expireKeys(ctx, expire)
 }
 
 func (r *RedisRecorder) ObserveLog(ctx context.Context, projectID int, level string, distinctID string, deviceID string, ts time.Time) {
@@ -176,8 +180,10 @@ func (r *RedisRecorder) ObserveLog(ctx context.Context, projectID int, level str
 		pipe.PFAdd(ctx, devKey, deviceID)
 		expire[devKey] = r.dayTTL
 	}
+	// Expire rides in the same pipeline (commands run in order), halving
+	// the round trips per observed message.
+	expireKeysPiped(ctx, pipe, expire)
 	_, _ = pipe.Exec(ctx)
-	r.expireKeys(ctx, expire)
 }
 
 func (r *RedisRecorder) RebuildProjectFromDB(ctx context.Context, db *gorm.DB, opts RebuildProjectOptions) (RebuildProjectResult, error) {
@@ -279,18 +285,16 @@ func applyRebuildRange(q *gorm.DB, since *time.Time, until *time.Time) *gorm.DB 
 	return q
 }
 
-func (r *RedisRecorder) expireKeys(ctx context.Context, keys map[string]time.Duration) {
-	if r == nil || r.rdb == nil || len(keys) == 0 {
-		return
-	}
-	pipe := r.rdb.Pipeline()
+// expireKeysPiped enqueues EXPIRE commands onto an existing pipeline; Redis
+// runs pipeline commands in order, so setting the TTL after the key's create
+// command is safe and saves a round trip.
+func expireKeysPiped(ctx context.Context, pipe redis.Pipeliner, keys map[string]time.Duration) {
 	for k, ttl := range keys {
 		if strings.TrimSpace(k) == "" || ttl <= 0 {
 			continue
 		}
 		pipe.Expire(ctx, k, ttl)
 	}
-	_, _ = pipe.Exec(ctx)
 }
 
 func (r *RedisRecorder) Today(ctx context.Context, projectID int, now time.Time) (logs int64, events int64, errors int64, users int64, ok bool, err error) {
@@ -480,8 +484,9 @@ func (r *RedisRecorder) WarmActiveUsersFromDB(ctx context.Context, db *gorm.DB, 
 			return err
 		}
 	}
-	r.expireKeys(ctx, expire)
-	pipe = r.rdb.Pipeline()
+	// Expires ride the final pipeline (commands run in order) instead of a
+	// separate round trip.
+	expireKeysPiped(ctx, pipe, expire)
 	pipe.Set(ctx, readyDayKey, days, 25*time.Hour)
 	pipe.Set(ctx, readyMonthKey, months, 25*time.Hour)
 	_, err = pipe.Exec(ctx)
