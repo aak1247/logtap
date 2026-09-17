@@ -189,7 +189,9 @@ func sentryKeyFromHeader(h string) string {
 }
 
 type projectKeyCache struct {
-	mu        sync.Mutex
+	// RWMutex: every ingest request reads this cache, so hits take the
+	// shared lock; exclusive access is reserved for writes and pruning.
+	mu        sync.RWMutex
 	items     map[string]cacheEntry
 	maxItems  int
 	ttl       time.Duration
@@ -226,14 +228,10 @@ func (c *projectKeyCache) Get(projectID int, key string) (bool, bool) {
 	now := time.Now()
 	k := c.key(projectID, key)
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	e, ok := c.items[k]
-	if !ok {
-		return false, false
-	}
-	if now.After(e.until) {
-		delete(c.items, k)
+	if !ok || now.After(e.until) {
 		return false, false
 	}
 	return e.ok, true
