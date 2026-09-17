@@ -6,22 +6,27 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
+	"net"
 	"net/http"
 	"net/smtp"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/aak1247/logtap/internal/channel"
 	"github.com/aak1247/logtap/internal/config"
 	"github.com/aak1247/logtap/internal/model"
 	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -126,43 +131,58 @@ func (w *Worker) ProcessOnce(ctx context.Context, limit int) (int, error) {
 	}
 	workerClaimedTotal.Add(int64(len(items)))
 
-	processed := 0
+	// Dispatch concurrently so one slow webhook/SMTP endpoint cannot delay
+	// every other delivery for the length of its timeout.
+	processed := int64(0)
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(dispatchConcurrency)
 	for _, d := range items {
-		processed++
-
-		err := w.send(ctx, d)
-		if err == nil {
-			_ = w.DB.WithContext(ctx).Model(&model.AlertDelivery{}).Where("id = ?", d.ID).
-				Updates(map[string]any{"status": "sent", "updated_at": now, "last_error": ""}).Error
-			addMapCounter(workerSentTotalByChannel, d.ChannelType, 1)
-			continue
-		}
-
-		attempts := d.Attempts + 1
-		status := "pending"
-		next := now.Add(backoffDelay(attempts))
-		if isPermanent(err) {
-			status = "failed"
-			next = now
-		} else if attempts >= 10 {
-			status = "failed"
-			next = now
-		}
-		_ = w.DB.WithContext(ctx).Model(&model.AlertDelivery{}).Where("id = ?", d.ID).
-			Updates(map[string]any{
-				"attempts":        attempts,
-				"next_attempt_at": next,
-				"status":          status,
-				"last_error":      err.Error(),
-				"updated_at":      now,
-			}).Error
-		if status == "failed" {
-			addMapCounter(workerFailedTotalByChannel, d.ChannelType, 1)
-		} else {
-			addMapCounter(workerRetryTotalByChannel, d.ChannelType, 1)
-		}
+		d := d
+		group.Go(func() error {
+			w.processDelivery(groupCtx, d, now)
+			atomic.AddInt64(&processed, 1)
+			return nil
+		})
 	}
-	return processed, nil
+	_ = group.Wait()
+	return int(processed), nil
+}
+
+// dispatchConcurrency bounds parallel alert deliveries per tick.
+const dispatchConcurrency = 8
+
+func (w *Worker) processDelivery(ctx context.Context, d model.AlertDelivery, now time.Time) {
+	err := w.send(ctx, d)
+	if err == nil {
+		_ = w.DB.WithContext(ctx).Model(&model.AlertDelivery{}).Where("id = ?", d.ID).
+			Updates(map[string]any{"status": "sent", "updated_at": now, "last_error": ""}).Error
+		addMapCounter(workerSentTotalByChannel, d.ChannelType, 1)
+		return
+	}
+
+	attempts := d.Attempts + 1
+	status := "pending"
+	next := now.Add(backoffDelay(attempts))
+	if isPermanent(err) {
+		status = "failed"
+		next = now
+	} else if attempts >= 10 {
+		status = "failed"
+		next = now
+	}
+	_ = w.DB.WithContext(ctx).Model(&model.AlertDelivery{}).Where("id = ?", d.ID).
+		Updates(map[string]any{
+			"attempts":        attempts,
+			"next_attempt_at": next,
+			"status":          status,
+			"last_error":      err.Error(),
+			"updated_at":      now,
+		}).Error
+	if status == "failed" {
+		addMapCounter(workerFailedTotalByChannel, d.ChannelType, 1)
+	} else {
+		addMapCounter(workerRetryTotalByChannel, d.ChannelType, 1)
+	}
 }
 
 func (w *Worker) cleanupOnce(ctx context.Context) error {
@@ -343,10 +363,13 @@ func backoffDelay(attempt int) time.Duration {
 	for i := 1; i < attempt; i++ {
 		d *= 2
 		if d > 30*time.Minute {
-			return 30 * time.Minute
+			d = 30 * time.Minute
+			break
 		}
 	}
-	return d
+	// ±20% jitter so retries from many deliveries don't align in waves.
+	jitter := 0.8 + 0.4*rand.Float64()
+	return time.Duration(float64(d) * jitter)
 }
 
 func (w *Worker) send(ctx context.Context, d model.AlertDelivery) error {
@@ -494,7 +517,64 @@ func (w *Worker) sendEmail(to string, subject string, body string) error {
 	if strings.TrimSpace(w.Config.SMTPUsername) != "" {
 		auth = smtp.PlainAuth("", w.Config.SMTPUsername, w.Config.SMTPPassword, host)
 	}
-	return smtp.SendMail(addr, auth, from, []string{to}, msg)
+	return sendMailWithTimeout(addr, auth, from, []string{to}, msg, smtpSendTimeout)
+}
+
+// smtpSendTimeout bounds both the TCP dial and the whole SMTP session; an
+// unreachable SMTP host must not stall the delivery queue for minutes.
+const smtpSendTimeout = 15 * time.Second
+
+// sendMailWithTimeout mirrors net/smtp.SendMail (opportunistic STARTTLS,
+// optional auth) but bounds the connection with a deadline.
+func sendMailWithTimeout(addr string, auth smtp.Auth, from string, to []string, msg []byte, timeout time.Duration) error {
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
+	}
+	c, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err = c.StartTLS(&tls.Config{ServerName: host}); err != nil {
+			return err
+		}
+	}
+	if auth != nil {
+		if ok, _ := c.Extension("AUTH"); ok {
+			if err = c.Auth(auth); err != nil {
+				return err
+			}
+		}
+	}
+	if err = c.Mail(from); err != nil {
+		return err
+	}
+	for _, rcpt := range to {
+		if err = c.Rcpt(rcpt); err != nil {
+			return err
+		}
+	}
+	w, err := c.Data()
+	if err != nil {
+		return err
+	}
+	if _, err = w.Write(msg); err != nil {
+		return err
+	}
+	if err = w.Close(); err != nil {
+		return err
+	}
+	return c.Quit()
 }
 
 type permanentError struct{ err error }
