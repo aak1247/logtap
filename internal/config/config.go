@@ -72,6 +72,11 @@ type Config struct {
 	AlertDeliveriesRetentionDays int
 	AlertStatesRetentionDays     int
 
+	// Operational-telemetry retention (optional). monitor_runs and
+	// detector_results grow one row per check; disabled when days <= 0.
+	MonitorRunsRetentionDays     int
+	DetectorResultsRetentionDays int
+
 	// Alerting / notifications (optional).
 	SMTPHost     string
 	SMTPPort     int
@@ -149,6 +154,8 @@ Optional: set AUTH_SECRET_FILE=/path/to/secret (file contains the base64 secret)
 		CleanupDeleteBatchSize:       parseIntDefault(getenvDefault("CLEANUP_DELETE_BATCH_SIZE", "5000"), 5000),
 		CleanupMaxBatches:            parseIntDefault(getenvDefault("CLEANUP_MAX_BATCHES", "50"), 50),
 		CleanupBatchSleep:            parseDurationDefault(getenvDefault("CLEANUP_BATCH_SLEEP", "0s"), 0),
+		MonitorRunsRetentionDays:     parseIntDefault(getenvDefault("MONITOR_RUNS_RETENTION_DAYS", "0"), 0),
+		DetectorResultsRetentionDays: parseIntDefault(getenvDefault("DETECTOR_RESULTS_RETENTION_DAYS", "0"), 0),
 		RedisAddr:                    strings.TrimSpace(os.Getenv("REDIS_ADDR")),
 		RedisPassword:                os.Getenv("REDIS_PASSWORD"),
 		RedisDB:                      parseIntDefault(getenvDefault("REDIS_DB", "0"), 0),

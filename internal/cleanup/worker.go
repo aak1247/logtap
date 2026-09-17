@@ -18,6 +18,9 @@ type Worker struct {
 	MaxBatches      int
 	BatchSleep      time.Duration
 	Stats           *obs.Stats
+	// Global telemetry retention (all projects). Disabled when <= 0.
+	MonitorRunsRetentionDays     int
+	DetectorResultsRetentionDays int
 }
 
 func NewWorker(db *gorm.DB) *Worker {
@@ -72,7 +75,58 @@ func (w *Worker) runOnce(ctx context.Context) error {
 			log.Printf("cleanup: project=%d: %v", projectID, err)
 		}
 	}
+
+	if w.MonitorRunsRetentionDays > 0 {
+		before := now.Add(-time.Duration(w.MonitorRunsRetentionDays) * 24 * time.Hour)
+		deleted, err := w.deleteInBatches(ctx, func(ctx context.Context, before time.Time, batchSize int) (int64, error) {
+			return store.DeleteMonitorRunsBeforeBatched(ctx, w.DB, before, batchSize)
+		}, before)
+		if err != nil {
+			log.Printf("cleanup: monitor_runs retention: %v", err)
+		} else if deleted > 0 {
+			log.Printf("cleanup: monitor_runs deleted=%d before=%s", deleted, before.Format(time.RFC3339))
+		}
+	}
+	if w.DetectorResultsRetentionDays > 0 {
+		before := now.Add(-time.Duration(w.DetectorResultsRetentionDays) * 24 * time.Hour)
+		deleted, err := w.deleteInBatches(ctx, func(ctx context.Context, before time.Time, batchSize int) (int64, error) {
+			return store.DeleteDetectorResultsBeforeBatched(ctx, w.DB, before, batchSize)
+		}, before)
+		if err != nil {
+			log.Printf("cleanup: detector_results retention: %v", err)
+		} else if deleted > 0 {
+			log.Printf("cleanup: detector_results deleted=%d before=%s", deleted, before.Format(time.RFC3339))
+		}
+	}
 	return nil
+}
+
+// deleteInBatches runs a batched delete until it drains or hits the per-tick
+// batch ceiling, keeping each transaction short.
+func (w *Worker) deleteInBatches(ctx context.Context, delete func(ctx context.Context, before time.Time, batchSize int) (int64, error), before time.Time) (int64, error) {
+	maxBatches := w.MaxBatches
+	if maxBatches <= 0 {
+		maxBatches = 1
+	}
+	batchSize := w.DeleteBatchSize
+	if batchSize <= 0 {
+		batchSize = 5000
+	}
+	var total int64
+	for i := 0; i < maxBatches; i++ {
+		n, err := delete(ctx, before, batchSize)
+		if err != nil {
+			return total, err
+		}
+		total += n
+		if n == 0 || ctx.Err() != nil {
+			break
+		}
+		if w.BatchSleep > 0 {
+			time.Sleep(w.BatchSleep)
+		}
+	}
+	return total, nil
 }
 
 func (w *Worker) runPolicy(ctx context.Context, projectID int, logsDays int, eventsDays int, trackEventsDays int, hourUTC int, minuteUTC int) error {

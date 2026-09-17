@@ -155,6 +155,8 @@ docker compose up --build
 | `ALERT_CLEANUP_INTERVAL` | 告警历史清理间隔。 | `1h` |
 | `ALERT_DELIVERIES_RETENTION_DAYS` | 告警投递记录保留天数（0=不清理）。 | `0` |
 | `ALERT_STATES_RETENTION_DAYS` | 告警状态记录保留天数（0=不清理）。 | `0` |
+| `MONITOR_RUNS_RETENTION_DAYS` | 监控运行记录保留天数（0=不清理）。 | `0` |
+| `DETECTOR_RESULTS_RETENTION_DAYS` | 探测结果记录保留天数（0=不清理）。 | `0` |
 
 #### Webhook SSRF 防护
 

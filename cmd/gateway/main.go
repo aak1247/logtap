@@ -205,6 +205,8 @@ func main() {
 		w.MaxBatches = cfg.CleanupMaxBatches
 		w.BatchSleep = cfg.CleanupBatchSleep
 		w.Stats = stats
+		w.MonitorRunsRetentionDays = cfg.MonitorRunsRetentionDays
+		w.DetectorResultsRetentionDays = cfg.DetectorResultsRetentionDays
 		go w.Run(ctx)
 		log.Printf("cleanup worker enabled")
 	}

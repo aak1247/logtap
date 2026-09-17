@@ -111,3 +111,45 @@ func DeleteTrackEventsBefore(ctx context.Context, db *gorm.DB, projectID int, be
 		Delete(&model.TrackEvent{})
 	return res.RowsAffected, res.Error
 }
+
+// DeleteMonitorRunsBeforeBatched deletes monitor runs older than `before`
+// across all projects in bounded chunks. Raw per-run rows are operational
+// telemetry; retention is opt-in via MONITOR_RUNS_RETENTION_DAYS.
+func DeleteMonitorRunsBeforeBatched(ctx context.Context, db *gorm.DB, before time.Time, batchSize int) (int64, error) {
+	if db == nil {
+		return 0, gorm.ErrInvalidDB
+	}
+	if batchSize <= 0 {
+		batchSize = 5000
+	}
+	res := db.WithContext(ctx).Exec(`
+		WITH doomed AS (
+			SELECT id FROM monitor_runs
+			WHERE started_at < ?
+			LIMIT ?
+		)
+		DELETE FROM monitor_runs WHERE id IN (SELECT id FROM doomed)
+	`, before.UTC(), batchSize)
+	return res.RowsAffected, res.Error
+}
+
+// DeleteDetectorResultsBeforeBatched deletes detector results older than
+// `before` across all projects in bounded chunks. Opt-in via
+// DETECTOR_RESULTS_RETENTION_DAYS.
+func DeleteDetectorResultsBeforeBatched(ctx context.Context, db *gorm.DB, before time.Time, batchSize int) (int64, error) {
+	if db == nil {
+		return 0, gorm.ErrInvalidDB
+	}
+	if batchSize <= 0 {
+		batchSize = 5000
+	}
+	res := db.WithContext(ctx).Exec(`
+		WITH doomed AS (
+			SELECT id FROM detector_results
+			WHERE timestamp < ?
+			LIMIT ?
+		)
+		DELETE FROM detector_results WHERE id IN (SELECT id FROM doomed)
+	`, before.UTC(), batchSize)
+	return res.RowsAffected, res.Error
+}

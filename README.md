@@ -155,6 +155,8 @@ See `.env.example` for a complete example.
 | `ALERT_CLEANUP_INTERVAL` | Alert history cleanup interval. | `1h` |
 | `ALERT_DELIVERIES_RETENTION_DAYS` | Alert delivery records retention days (0=disabled). | `0` |
 | `ALERT_STATES_RETENTION_DAYS` | Alert state records retention days (0=disabled). | `0` |
+| `MONITOR_RUNS_RETENTION_DAYS` | Monitor run records retention days (0=disabled). | `0` |
+| `DETECTOR_RESULTS_RETENTION_DAYS` | Detector result records retention days (0=disabled). | `0` |
 
 #### Webhook SSRF Protection
 
