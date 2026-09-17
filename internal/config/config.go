@@ -143,8 +143,8 @@ Optional: set AUTH_SECRET_FILE=/path/to/secret (file contains the base64 secret)
 		NSQMaxInFlight:               parseIntDefault(getenvDefault("NSQ_MAX_IN_FLIGHT", "2000"), 2000),
 		NSQEventConcurrency:          parseIntDefault(getenvDefault("NSQ_EVENT_CONCURRENCY", "50"), 50),
 		NSQLogConcurrency:            parseIntDefault(getenvDefault("NSQ_LOG_CONCURRENCY", "200"), 200),
-		DBMaxOpenConns:               parseIntDefault(getenvDefault("DB_MAX_OPEN_CONNS", "10"), 10),
-		DBMaxIdleConns:               parseIntDefault(getenvDefault("DB_MAX_IDLE_CONNS", "1"), 1),
+		DBMaxOpenConns:               parseIntDefault(getenvDefault("DB_MAX_OPEN_CONNS", "25"), 25),
+		DBMaxIdleConns:               parseIntDefault(getenvDefault("DB_MAX_IDLE_CONNS", "5"), 5),
 		DBLogBatchSize:               parseIntDefault(getenvDefault("DB_LOG_BATCH_SIZE", "500"), 500),
 		DBLogFlushInterval:           parseDurationDefault(getenvDefault("DB_LOG_FLUSH_INTERVAL", "20ms"), 20*time.Millisecond),
 		DBEventBatchSize:             parseIntDefault(getenvDefault("DB_EVENT_BATCH_SIZE", "200"), 200),
@@ -289,8 +289,8 @@ Optional: set AUTH_SECRET_FILE=/path/to/secret (file contains the base64 secret)
 func FromEnvAlertWorker() (Config, error) {
 	cfg := Config{
 		PostgresURL:    strings.TrimSpace(os.Getenv("POSTGRES_URL")),
-		DBMaxOpenConns: parseIntDefault(getenvDefault("DB_MAX_OPEN_CONNS", "10"), 10),
-		DBMaxIdleConns: parseIntDefault(getenvDefault("DB_MAX_IDLE_CONNS", "1"), 1),
+		DBMaxOpenConns: parseIntDefault(getenvDefault("DB_MAX_OPEN_CONNS", "25"), 25),
+		DBMaxIdleConns: parseIntDefault(getenvDefault("DB_MAX_IDLE_CONNS", "5"), 5),
 
 		WebhookAllowLoopback:         parseBoolDefault(getenvDefault("WEBHOOK_ALLOW_LOOPBACK", "false"), false),
 		WebhookAllowPrivateIPs:       parseBoolDefault(getenvDefault("WEBHOOK_ALLOW_PRIVATE_IPS", "false"), false),
