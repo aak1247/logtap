@@ -78,6 +78,19 @@ func AutoMigrate(ctx context.Context, db *gorm.DB, opts Options) error {
 		return err
 	}
 
+	// Trigram index for substring keyword search. Without it,
+	// message ILIKE '%kw%' falls back to a sequential scan of the time range
+	// per search request. The unified search adapter also relies on the
+	// pg_trgm extension being present.
+	if strings.EqualFold(db.Dialector.Name(), "postgres") {
+		if err := gdb.Exec(`CREATE EXTENSION IF NOT EXISTS pg_trgm`).Error; err != nil {
+			return fmt.Errorf("create pg_trgm extension: %w", err)
+		}
+		if err := gdb.Exec(`CREATE INDEX IF NOT EXISTS idx_logs_message_trgm ON logs USING GIN (message gin_trgm_ops)`).Error; err != nil {
+			return fmt.Errorf("create logs message trigram index: %w", err)
+		}
+	}
+
 	if err := gdb.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_project_keys_project_name ON project_keys (project_id, name)`).Error; err != nil {
 		return err
 	}
