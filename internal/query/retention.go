@@ -116,59 +116,67 @@ func retentionRowsFromDB(ctx context.Context, db *gorm.DB, projectID int, start,
 	if strings.EqualFold(db.Dialector.Name(), "postgres") {
 		dayExpr = "TO_CHAR(timestamp AT TIME ZONE 'UTC', 'YYYY-MM-DD')"
 	}
+
+	// Compute cohort sizes and per-offset retained counts entirely in the
+	// database via a self-join over the (day, distinct_id) pairs. Pushing the
+	// aggregation down avoids loading every active (day, user) pair into Go
+	// memory; only the small aggregate matrix is transferred. The DISTINCT
+	// wraps the whole union so a user active in several sources on the same
+	// day counts once.
 	var b strings.Builder
 	var args []any
-	b.WriteString("WITH active_events AS (")
+	b.WriteString("WITH active_events AS (SELECT DISTINCT day, distinct_id FROM (")
 	for i, source := range sources {
 		if i > 0 {
 			b.WriteString(" UNION ALL ")
 		}
-		b.WriteString("SELECT DISTINCT ")
+		b.WriteString("SELECT ")
 		b.WriteString(dayExpr)
 		b.WriteString(" AS day, distinct_id FROM ")
 		b.WriteString(source)
 		b.WriteString(" WHERE project_id = ? AND distinct_id IS NOT NULL AND distinct_id <> '' AND timestamp >= ? AND timestamp < ?")
 		args = append(args, projectID, startDay, queryEndExclusive)
 	}
-	b.WriteString(") SELECT day, distinct_id FROM active_events ORDER BY day")
+	b.WriteString(") u), pairs AS (")
+	b.WriteString(" SELECT a.day AS cohort_day, b.day AS active_day")
+	b.WriteString(" FROM active_events a JOIN active_events b ON b.distinct_id = a.distinct_id AND b.day >= a.day")
+	b.WriteString(") SELECT cohort_day, active_day, COUNT(*) AS users FROM pairs GROUP BY cohort_day, active_day")
 
-	type activeUserRow struct {
-		Day        string `gorm:"column:day"`
-		DistinctID string `gorm:"column:distinct_id"`
+	type pairRow struct {
+		CohortDay string `gorm:"column:cohort_day"`
+		ActiveDay string `gorm:"column:active_day"`
+		Users     int64  `gorm:"column:users"`
 	}
-	var activeRows []activeUserRow
-	if err := db.WithContext(ctx).Raw(b.String(), args...).Scan(&activeRows).Error; err != nil {
+	var pairs []pairRow
+	if err := db.WithContext(ctx).Raw(b.String(), args...).Scan(&pairs).Error; err != nil {
 		return nil, err
 	}
 
-	byDay := map[string]map[string]struct{}{}
-	for _, row := range activeRows {
-		day := strings.TrimSpace(row.Day)
-		if len(day) > len("2006-01-02") {
-			day = day[:len("2006-01-02")]
-		}
-		distinctID := strings.TrimSpace(row.DistinctID)
-		if day == "" || distinctID == "" {
+	retained := map[[2]string]int64{}
+	cohortSizes := map[string]int64{}
+	for _, p := range pairs {
+		cohort := normalizeRetentionDay(p.CohortDay)
+		active := normalizeRetentionDay(p.ActiveDay)
+		if cohort == "" || active == "" {
 			continue
 		}
-		if byDay[day] == nil {
-			byDay[day] = map[string]struct{}{}
+		retained[[2]string{cohort, active}] += p.Users
+		if cohort == active {
+			cohortSizes[cohort] = retained[[2]string{cohort, active}]
 		}
-		byDay[day][distinctID] = struct{}{}
 	}
 
 	out := make([]metrics.RetentionRow, 0, int(endDay.Sub(startDay).Hours()/24)+1)
 	for cur := startDay; !cur.After(endDay); cur = cur.AddDate(0, 0, 1) {
 		cohort := cur.Format("2006-01-02")
-		cohortUsers := byDay[cohort]
 		row := metrics.RetentionRow{
 			Cohort:     cohort,
-			CohortSize: int64(len(cohortUsers)),
+			CohortSize: cohortSizes[cohort],
 			Points:     make([]metrics.RetentionPoint, 0, len(offsets)),
 		}
 		for _, d := range offsets {
-			targetUsers := byDay[cur.AddDate(0, 0, d).Format("2006-01-02")]
-			active := retentionIntersectionSize(cohortUsers, targetUsers)
+			activeDay := cur.AddDate(0, 0, d).Format("2006-01-02")
+			active := retained[[2]string{cohort, activeDay}]
 			rate := 0.0
 			if row.CohortSize > 0 {
 				rate = float64(active) / float64(row.CohortSize)
@@ -178,6 +186,16 @@ func retentionRowsFromDB(ctx context.Context, db *gorm.DB, projectID int, start,
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// normalizeRetentionDay trims sqlite DATE() output ("2006-01-02 00:00:00")
+// down to the plain date label.
+func normalizeRetentionDay(day string) string {
+	day = strings.TrimSpace(day)
+	if len(day) > len("2006-01-02") {
+		day = day[:len("2006-01-02")]
+	}
+	return day
 }
 
 func normalizeRetentionOffsets(dayOffsets []int) []int {
@@ -198,22 +216,6 @@ func normalizeRetentionOffsets(dayOffsets []int) []int {
 		return offsets[:10]
 	}
 	return offsets
-}
-
-func retentionIntersectionSize(a, b map[string]struct{}) int64 {
-	if len(a) == 0 || len(b) == 0 {
-		return 0
-	}
-	if len(a) > len(b) {
-		a, b = b, a
-	}
-	var n int64
-	for id := range a {
-		if _, ok := b[id]; ok {
-			n++
-		}
-	}
-	return n
 }
 
 func parseCSVPositiveInts(raw string, def []int, maxN int, maxValue int) []int {
