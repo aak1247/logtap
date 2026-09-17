@@ -174,10 +174,13 @@ func handleEventMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisR
 				}
 				row, err := store.EventRowFromMap(msg.ProjectID, event)
 				if err != nil {
+					// Permanent payload error: requeueing would apply
+					// connection-wide backoff without ever succeeding.
+					log.Printf("dropping malformed event (project=%s): %v", msg.ProjectID, err)
 					if stats != nil {
 						stats.ObserveConsumerMessage(time.Since(msgStart), err)
 					}
-					return err
+					return nil
 				}
 
 				if err := batcher.Add(row); err != nil {
@@ -219,10 +222,13 @@ func handleEventMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisR
 
 				row, err := store.EventRowFromMap(msg.ProjectID, payload)
 				if err != nil {
+					// Permanent payload error: requeueing would apply
+					// connection-wide backoff without ever succeeding.
+					log.Printf("dropping malformed envelope (project=%s): %v", msg.ProjectID, err)
 					if stats != nil {
 						stats.ObserveConsumerMessage(time.Since(msgStart), err)
 					}
-					return err
+					return nil
 				}
 				if err := batcher.Add(row); err != nil {
 					if stats != nil {
@@ -305,10 +311,13 @@ func handleLogMessage(cfg config.Config, db *gorm.DB, recorder *metrics.RedisRec
 			copy(ingestID[:], m.ID[:])
 			row, err := store.LogRowFromPayloadWithIngestID(msg.ProjectID, lp, ingestID)
 			if err != nil {
+				// Permanent payload error: requeueing would apply
+				// connection-wide backoff without ever succeeding.
+				log.Printf("dropping malformed log (project=%s): %v", msg.ProjectID, err)
 				if stats != nil {
 					stats.ObserveConsumerMessage(time.Since(msgStart), err)
 				}
-				return err
+				return nil
 			}
 			if err := batcher.Add(row); err != nil {
 				if stats != nil {
