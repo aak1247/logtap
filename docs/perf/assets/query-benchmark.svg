@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 360" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif">
 <rect width="820" height="360" fill="#ffffff"/>
-<text x="410.0" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#1f2937">Query & Analytics Latency & Throughput (10 Concurrent VUs)</text>
+<text x="410.0" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#1f2937">Query &amp; Analytics Latency &amp; Throughput (10 Concurrent VUs)</text>
 <text x="410.0" y="48" text-anchor="middle" font-size="11.5" fill="#6b7280">Tested on PostgreSQL 16 / TimescaleDB with hundreds of thousands of events</text>
 <line x1="260.0" y1="60" x2="260.0" y2="310" stroke="#f3f4f6" stroke-width="1"/>
 <text x="260.0" y="326" text-anchor="middle" font-size="11" fill="#6b7280">0</text>
