@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 440" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif">
+<rect width="820" height="440" fill="#ffffff"/>
+<text x="410.0" y="36" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2937">日志写入：并发 - EPS &amp; P95 延迟曲线</text>
+<text x="410.0" y="56" text-anchor="middle" font-size="12" fill="#6b7280">固定节奏客户端 (1s/次, Batch=50) 阶梯并发压测 · 捕获系统性能拐点</text>
+<line x1="80" y1="370.0" x2="740" y2="370.0" stroke="#f3f4f6" stroke-width="1"/>
+<text x="68" y="374.0" text-anchor="end" font-size="11" fill="#6b7280">0</text>
+<line x1="80" y1="320.0" x2="740" y2="320.0" stroke="#f3f4f6" stroke-width="1"/>
+<text x="68" y="324.0" text-anchor="end" font-size="11" fill="#6b7280">2000</text>
+<line x1="80" y1="270.0" x2="740" y2="270.0" stroke="#f3f4f6" stroke-width="1"/>
+<text x="68" y="274.0" text-anchor="end" font-size="11" fill="#6b7280">4000</text>
+<line x1="80" y1="220.0" x2="740" y2="220.0" stroke="#f3f4f6" stroke-width="1"/>
+<text x="68" y="224.0" text-anchor="end" font-size="11" fill="#6b7280">6000</text>
+<line x1="80" y1="170.0" x2="740" y2="170.0" stroke="#f3f4f6" stroke-width="1"/>
+<text x="68" y="174.0" text-anchor="end" font-size="11" fill="#6b7280">8000</text>
+<line x1="80" y1="120.0" x2="740" y2="120.0" stroke="#f3f4f6" stroke-width="1"/>
+<text x="68" y="124.0" text-anchor="end" font-size="11" fill="#6b7280">10000</text>
+<line x1="80" y1="70.0" x2="740" y2="70.0" stroke="#f3f4f6" stroke-width="1"/>
+<text x="68" y="74.0" text-anchor="end" font-size="11" fill="#6b7280">12000</text>
+<text x="752" y="374.0" text-anchor="start" font-size="11" fill="#f59e0b">0 ms</text>
+<text x="752" y="314.0" text-anchor="start" font-size="11" fill="#f59e0b">500 ms</text>
+<text x="752" y="254.0" text-anchor="start" font-size="11" fill="#f59e0b">1000 ms</text>
+<text x="752" y="194.0" text-anchor="start" font-size="11" fill="#f59e0b">1500 ms</text>
+<text x="752" y="134.0" text-anchor="start" font-size="11" fill="#f59e0b">2000 ms</text>
+<text x="752" y="74.0" text-anchor="start" font-size="11" fill="#f59e0b">2500 ms</text>
+<text x="35" y="56" font-size="12" font-weight="600" fill="#4b5563">吞吐量 (EPS)</text>
+<text x="744" y="56" font-size="12" font-weight="600" fill="#d97706">P95 延迟</text>
+<line x1="80" y1="370" x2="740" y2="370" stroke="#9ca3af" stroke-width="1.2"/>
+<line x1="80" y1="70" x2="80" y2="370" stroke="#9ca3af" stroke-width="1.2"/>
+<line x1="740" y1="70" x2="740" y2="370" stroke="#9ca3af" stroke-width="1.2"/>
+<rect x="99.8" y="358.3" width="42.9" height="11.7" fill="#fed7aa" opacity="0.88" rx="2"/>
+<text x="121.2" y="352.3" text-anchor="middle" font-size="11" font-weight="600" fill="#b45309">466</text>
+<text x="121.2" y="390" text-anchor="middle" font-size="12" font-weight="500" fill="#374151">10</text>
+<rect x="182.3" y="346.7" width="42.9" height="23.3" fill="#fed7aa" opacity="0.88" rx="2"/>
+<text x="203.8" y="340.7" text-anchor="middle" font-size="11" font-weight="600" fill="#b45309">933</text>
+<text x="203.8" y="390" text-anchor="middle" font-size="12" font-weight="500" fill="#374151">20</text>
+<rect x="264.8" y="323.3" width="42.9" height="46.7" fill="#fed7aa" opacity="0.88" rx="2"/>
+<text x="286.2" y="317.3" text-anchor="middle" font-size="11" font-weight="600" fill="#b45309">1866</text>
+<text x="286.2" y="390" text-anchor="middle" font-size="12" font-weight="500" fill="#374151">40</text>
+<rect x="347.3" y="276.7" width="42.9" height="93.3" fill="#fed7aa" opacity="0.88" rx="2"/>
+<text x="368.8" y="270.7" text-anchor="middle" font-size="11" font-weight="600" fill="#b45309">3733</text>
+<text x="368.8" y="390" text-anchor="middle" font-size="12" font-weight="500" fill="#374151">80</text>
+<rect x="429.8" y="230.0" width="42.9" height="140.0" fill="#fed7aa" opacity="0.88" rx="2"/>
+<text x="451.2" y="224.0" text-anchor="middle" font-size="11" font-weight="600" fill="#b45309">5600</text>
+<text x="451.2" y="390" text-anchor="middle" font-size="12" font-weight="500" fill="#374151">120</text>
+<rect x="512.3" y="183.4" width="42.9" height="186.6" fill="#fed7aa" opacity="0.88" rx="2"/>
+<text x="533.8" y="177.4" text-anchor="middle" font-size="11" font-weight="600" fill="#b45309">7463</text>
+<text x="533.8" y="390" text-anchor="middle" font-size="12" font-weight="500" fill="#374151">160</text>
+<rect x="594.8" y="147.7" width="42.9" height="222.3" fill="#fed7aa" opacity="0.88" rx="2"/>
+<text x="616.2" y="141.7" text-anchor="middle" font-size="11" font-weight="600" fill="#b45309">8893</text>
+<text x="616.2" y="390" text-anchor="middle" font-size="12" font-weight="500" fill="#374151">200</text>
+<rect x="677.3" y="90.0" width="42.9" height="280.0" fill="#fed7aa" opacity="0.88" rx="2"/>
+<text x="698.8" y="84.0" text-anchor="middle" font-size="11" font-weight="600" fill="#b45309">11200</text>
+<text x="698.8" y="390" text-anchor="middle" font-size="12" font-weight="500" fill="#374151">240</text>
+<text x="410.0" y="416" text-anchor="middle" font-size="13" font-weight="600" fill="#4b5563">并发客户端数 (VUs)</text>
+<path d="M 121.2 369.8 L 203.8 369.8 L 286.2 369.8 L 368.8 369.8 L 451.2 369.8 L 533.8 350.3 L 616.2 131.3 L 698.8 244.9" fill="none" stroke="#ea580c" stroke-width="2.5" stroke-linejoin="round"/>
+<circle cx="121.2" cy="369.8" r="4" fill="#ffffff" stroke="#ea580c" stroke-width="2"/>
+<circle cx="203.8" cy="369.8" r="4" fill="#ffffff" stroke="#ea580c" stroke-width="2"/>
+<circle cx="286.2" cy="369.8" r="4" fill="#ffffff" stroke="#ea580c" stroke-width="2"/>
+<circle cx="368.8" cy="369.8" r="4" fill="#ffffff" stroke="#ea580c" stroke-width="2"/>
+<circle cx="451.2" cy="369.8" r="4" fill="#ffffff" stroke="#ea580c" stroke-width="2"/>
+<circle cx="533.8" cy="350.3" r="4" fill="#ffffff" stroke="#ea580c" stroke-width="2"/>
+<circle cx="616.2" cy="131.3" r="4" fill="#ffffff" stroke="#ea580c" stroke-width="2"/>
+<circle cx="698.8" cy="244.9" r="4" fill="#ffffff" stroke="#ea580c" stroke-width="2"/>
+<line x1="533.8" y1="350.33056" x2="533.8" y2="370" stroke="#ef4444" stroke-width="1.2" stroke-dasharray="3,3"/>
+<rect x="478.8" y="312.3" width="110" height="26" fill="#fee2e2" stroke="#f87171" rx="4"/>
+<text x="533.8" y="329.3" text-anchor="middle" font-size="11" font-weight="700" fill="#b91c1c">★ 性能拐点 (~7.5k EPS)</text>
+<rect x="92" y="80" width="16" height="12" fill="#fed7aa" rx="2"/>
+<text x="114" y="90" font-size="11" fill="#4b5563">吞吐量 (EPS)</text>
+<line x1="210" y1="86" x2="235" y2="86" stroke="#ea580c" stroke-width="2.5"/>
+<circle cx="222.5" cy="86" r="3.5" fill="#ffffff" stroke="#ea580c" stroke-width="1.8"/>
+<text x="242" y="90" font-size="11" fill="#4b5563">P95 延迟 (ms)</text>
+</svg>

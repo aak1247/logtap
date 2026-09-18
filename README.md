@@ -219,20 +219,47 @@ See `.env.example` for a complete example.
 |----------|-------------|---------|
 | `DETECTOR_PLUGIN_DIRS` | Detector plugin directories, comma/space separated. | - |
 
-## Performance
+## Performance Benchmarks
 
-Reference ingest profile (single all-in-one host: gateway + PostgreSQL + Redis + nsqd; batch=50; medians of 3 runs):
+Measured on a single-node reference environment (gateway + PostgreSQL 16 / TimescaleDB + Redis 7 + nsqd 1.2.1):
 
-![Ingest benchmark profile](docs/perf/assets/benchmark-profile.svg)
+### 1. Ingest: Concurrency vs. EPS & P95 Latency (Knee Curve)
 
-| Client concurrency | Throughput (logs/s) | p50 | p95 | p99 |
-|---:|---:|---:|---:|---:|
-| 10 | 12,108 | 2ms | 317ms | 810ms |
-| 25 | 12,483 | 6ms | 466ms | 902ms |
-| 50 | 11,938 | 15ms | 951ms | 1,199ms |
-| 100 | 12,892 | 309ms | 1,037ms | 1,588ms |
+Each virtual client issues requests at a paced 1-second cadence (`Batch=50`, 50 EPS/VU). As concurrency increases from 10 to 120 VUs, throughput scales linearly from ~500 to ~5,600 EPS while **P95 latency remains exceptionally stable under 2ms**. The system encounters its knee at ~160 VUs (7.5k EPS), entering the plateau where P95 latency elevates.
 
-Throughput plateaus around 12k–13k logs/s while ingest and consumption share one host; tail latency grows with client concurrency. Treat this as a shared-host reference, not a distributed-deployment ceiling — methodology, raw data and variance notes live in [`docs/perf/README.md`](docs/perf/README.md).
+![Ingest Concurrency vs EPS and Latency](docs/perf/assets/ingest-load-curve.svg)
+
+| Concurrency (VUs) | Target EPS | Actual EPS | P50 (ms) | P95 (ms) | P99 (ms) | Error Rate |
+|---:|---:|---:|---:|---:|---:|---:|
+| 10 | 500 | 467 | 1.5ms | 1.8ms | 2.4ms | 0.00% |
+| 20 | 1,000 | 933 | 1.5ms | 1.9ms | 2.6ms | 0.00% |
+| 40 | 2,000 | 1,867 | 1.4ms | 1.9ms | 3.3ms | 0.00% |
+| 80 | 4,000 | 3,733 | 1.4ms | 1.8ms | 2.9ms | 0.00% |
+| 120 | 6,000 | 5,600 | 1.4ms | 1.7ms | 2.8ms | 0.00% |
+| **160 (Knee)** | 8,000 | **7,463** | **1.3ms** | **163.9ms** | 556.2ms | 0.00% |
+| 200 | 10,000 | 8,893 | 478.9ms | 1,988.9ms | 2,310.5ms | 0.00% |
+| 240 | 12,000 | 11,200 | 301.8ms | 1,042.4ms | 1,196.8ms | 0.00% |
+
+### 2. Batch Size Impact (Pacing = 5,000 EPS Target)
+
+Comparing different client-side batching strategies under a sustained ~5,000 EPS workload. Recommended batch size is **50–200 logs/request** to minimize round-trip overhead while maintaining low tail latencies.
+
+![Batch Size Comparison](docs/perf/assets/batch-comparison.svg)
+
+### 3. Query & Analytics Performance (10 Concurrent Clients)
+
+Real-world query latency and throughput on a database pre-populated with hundreds of thousands of events:
+
+![Query Benchmark](docs/perf/assets/query-benchmark.svg)
+
+| Query Scenario | Endpoint / Type | QPS | P50 Latency | P95 Latency |
+|---|---|---:|---:|---:|
+| Recent Log Stream | `/logs/search?limit=50` (Point/Index scan) | **727.8** | **2.8ms** | **4.3ms** |
+| Full-Text Search | `/logs/search?q=...` (Trigram GIN Index) | **12.9** | **5.8ms** | **41.0ms** |
+| Metric Aggregation | `/logs/trend` (Hourly group-by aggregation) | **2.5** | 8.4s | 9.6s |
+| Retention Analysis | `/analytics/retention` (SQL self-join pushdown) | **5.0** | 3.0s | 3.0s |
+
+> For comprehensive benchmark methodology, raw metrics and standalone tools, see [`docs/perf/README.md`](docs/perf/README.md).
 
 ## Documentation
 

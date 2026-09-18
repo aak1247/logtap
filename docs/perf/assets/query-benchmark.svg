@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 360" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif">
+<rect width="820" height="360" fill="#ffffff"/>
+<text x="410.0" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#1f2937">检索与分析场景性能基准 (10 并发查询)</text>
+<text x="410.0" y="48" text-anchor="middle" font-size="11.5" fill="#6b7280">基于 PostgreSQL 16 / TimescaleDB 实测 · 包含点查、全文搜索与多维分析</text>
+<line x1="260.0" y1="60" x2="260.0" y2="310" stroke="#f3f4f6" stroke-width="1"/>
+<text x="260.0" y="326" text-anchor="middle" font-size="11" fill="#6b7280">0</text>
+<line x1="380.0" y1="60" x2="380.0" y2="310" stroke="#f3f4f6" stroke-width="1"/>
+<text x="380.0" y="326" text-anchor="middle" font-size="11" fill="#6b7280">200</text>
+<line x1="500.0" y1="60" x2="500.0" y2="310" stroke="#f3f4f6" stroke-width="1"/>
+<text x="500.0" y="326" text-anchor="middle" font-size="11" fill="#6b7280">400</text>
+<line x1="620.0" y1="60" x2="620.0" y2="310" stroke="#f3f4f6" stroke-width="1"/>
+<text x="620.0" y="326" text-anchor="middle" font-size="11" fill="#6b7280">600</text>
+<line x1="740.0" y1="60" x2="740.0" y2="310" stroke="#f3f4f6" stroke-width="1"/>
+<text x="740.0" y="326" text-anchor="middle" font-size="11" fill="#6b7280">800</text>
+<text x="500.0" y="346" text-anchor="middle" font-size="12" font-weight="600" fill="#4b5563">QPS (查询吞吐量)</text>
+<line x1="260" y1="60" x2="260" y2="310" stroke="#9ca3af" stroke-width="1.2"/>
+<line x1="260" y1="310" x2="740" y2="310" stroke="#9ca3af" stroke-width="1.2"/>
+<text x="248" y="95.2" text-anchor="end" font-size="12" font-weight="500" fill="#374151">1. 常用日志列表 (/logs/search?limit=50)</text>
+<rect x="260.0" y="79.2" width="436.7" height="24" fill="#818cf8" rx="3" opacity="0.9"/>
+<text x="704.7" y="95.2" font-size="11.5" font-weight="600" fill="#4338ca">727.8 QPS (P50: 2.8ms)</text>
+<text x="248" y="157.8" text-anchor="end" font-size="12" font-weight="500" fill="#374151">2. 全文检索 (Trigram 索引 / 关键词)</text>
+<rect x="260.0" y="141.8" width="7.7" height="24" fill="#818cf8" rx="3" opacity="0.9"/>
+<text x="275.7" y="157.8" font-size="11.5" font-weight="600" fill="#4338ca">12.9 QPS (P50: 5.8ms)</text>
+<text x="248" y="220.2" text-anchor="end" font-size="12" font-weight="500" fill="#374151">3. 聚合时序 (/logs/trend 优化后)</text>
+<rect x="260.0" y="204.2" width="4.0" height="24" fill="#818cf8" rx="3" opacity="0.9"/>
+<text x="272.0" y="220.2" font-size="11.5" font-weight="600" fill="#4338ca">2.5 QPS (P50: 8482.8ms)</text>
+<text x="248" y="282.8" text-anchor="end" font-size="12" font-weight="500" fill="#374151">4. 用户留存 (SQL 自连接下推)</text>
+<rect x="260.0" y="266.8" width="4.0" height="24" fill="#818cf8" rx="3" opacity="0.9"/>
+<text x="272.0" y="282.8" font-size="11.5" font-weight="600" fill="#4338ca">5.0 QPS (P50: 3004.0ms)</text>
+</svg>

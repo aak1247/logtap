@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 360" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif">
+<rect width="820" height="360" fill="#ffffff"/>
+<text x="410.0" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#1f2937">批量大小 (Batch Size) 对吞吐与延迟的影响</text>
+<text x="410.0" y="48" text-anchor="middle" font-size="11.5" fill="#6b7280">恒定 5,000 EPS 目标压力下 · 批量 1 / 10 / 50 / 100 / 200 对比</text>
+<line x1="80" y1="300.0" x2="740" y2="300.0" stroke="#f3f4f6" stroke-width="1"/>
+<text x="70" y="304.0" text-anchor="end" font-size="11" fill="#6b7280">0</text>
+<line x1="80" y1="220.0" x2="740" y2="220.0" stroke="#f3f4f6" stroke-width="1"/>
+<text x="70" y="224.0" text-anchor="end" font-size="11" fill="#6b7280">2000</text>
+<line x1="80" y1="140.0" x2="740" y2="140.0" stroke="#f3f4f6" stroke-width="1"/>
+<text x="70" y="144.0" text-anchor="end" font-size="11" fill="#6b7280">4000</text>
+<line x1="80" y1="60.0" x2="740" y2="60.0" stroke="#f3f4f6" stroke-width="1"/>
+<text x="70" y="64.0" text-anchor="end" font-size="11" fill="#6b7280">6000</text>
+<text x="750" y="304.0" text-anchor="start" font-size="11" fill="#3b82f6">0ms</text>
+<text x="750" y="244.0" text-anchor="start" font-size="11" fill="#3b82f6">500ms</text>
+<text x="750" y="184.0" text-anchor="start" font-size="11" fill="#3b82f6">1000ms</text>
+<text x="750" y="124.0" text-anchor="start" font-size="11" fill="#3b82f6">1500ms</text>
+<text x="750" y="64.0" text-anchor="start" font-size="11" fill="#3b82f6">2000ms</text>
+<text x="35" y="48" font-size="12" font-weight="600" fill="#4b5563">实际 EPS</text>
+<text x="746" y="48" font-size="12" font-weight="600" fill="#2563eb">P95 延迟</text>
+<line x1="80" y1="300" x2="740" y2="300" stroke="#9ca3af" stroke-width="1.2"/>
+<line x1="80" y1="60" x2="80" y2="300" stroke="#9ca3af" stroke-width="1.2"/>
+<line x1="740" y1="60" x2="740" y2="300" stroke="#9ca3af" stroke-width="1.2"/>
+<rect x="116.3" y="113.4" width="59.4" height="186.6" fill="#bae6fd" opacity="0.85" rx="3"/>
+<text x="146.0" y="107.4" text-anchor="middle" font-size="11" font-weight="600" fill="#0369a1">4664</text>
+<text x="146.0" y="320" text-anchor="middle" font-size="12" font-weight="500" fill="#374151">Batch=1</text>
+<rect x="248.3" y="113.3" width="59.4" height="186.7" fill="#bae6fd" opacity="0.85" rx="3"/>
+<text x="278.0" y="107.3" text-anchor="middle" font-size="11" font-weight="600" fill="#0369a1">4666</text>
+<text x="278.0" y="320" text-anchor="middle" font-size="12" font-weight="500" fill="#374151">Batch=10</text>
+<rect x="380.3" y="113.3" width="59.4" height="186.7" fill="#bae6fd" opacity="0.85" rx="3"/>
+<text x="410.0" y="107.3" text-anchor="middle" font-size="11" font-weight="600" fill="#0369a1">4666</text>
+<text x="410.0" y="320" text-anchor="middle" font-size="12" font-weight="500" fill="#374151">Batch=50</text>
+<rect x="512.3" y="123.7" width="59.4" height="176.3" fill="#bae6fd" opacity="0.85" rx="3"/>
+<text x="542.0" y="117.7" text-anchor="middle" font-size="11" font-weight="600" fill="#0369a1">4406</text>
+<text x="542.0" y="320" text-anchor="middle" font-size="12" font-weight="500" fill="#374151">Batch=100</text>
+<rect x="644.3" y="113.3" width="59.4" height="186.7" fill="#bae6fd" opacity="0.85" rx="3"/>
+<text x="674.0" y="107.3" text-anchor="middle" font-size="11" font-weight="600" fill="#0369a1">4666</text>
+<text x="674.0" y="320" text-anchor="middle" font-size="12" font-weight="500" fill="#374151">Batch=200</text>
+<path d="M 146.0 299.9 L 278.0 299.9 L 410.0 219.3 L 542.0 107.9 L 674.0 299.3" fill="none" stroke="#2563eb" stroke-width="2.5" stroke-linejoin="round"/>
+<circle cx="146.0" cy="299.9" r="4" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<circle cx="278.0" cy="299.9" r="4" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<circle cx="410.0" cy="219.3" r="4" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<circle cx="542.0" cy="107.9" r="4" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<circle cx="674.0" cy="299.3" r="4" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<rect x="352.0" y="66.0" width="116.0" height="228.0" fill="#dcfce7" opacity="0.25" rx="4" stroke="#86efac" stroke-dasharray="3,3"/>
+<text x="410.0" y="84" text-anchor="middle" font-size="11" font-weight="700" fill="#15803d">推荐批量: 50~200</text>
+</svg>
