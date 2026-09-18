@@ -56,6 +56,11 @@ func main() {
 	stats := obs.New()
 	var publisher queue.Publisher = nsqPublisher
 	publisher = queue.ObservePublisher(publisher, stats)
+	if bp, ok := publisher.(queue.BatchPublisher); ok {
+		asyncPub := queue.NewAsyncBufferedPublisher(bp)
+		defer asyncPub.Stop()
+		publisher = asyncPub
+	}
 	if cfg.NSQDHTTPAddress != "" {
 		go obs.StartNSQDepthPoller(ctx, stats, cfg.NSQDHTTPAddress, 5*time.Second)
 	}

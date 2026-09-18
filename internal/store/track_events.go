@@ -84,11 +84,13 @@ func InsertLogsAndTrackEventsBatch(ctx context.Context, db *gorm.DB, logs []mode
 		events := TrackEventRowsFromLogs(newLogs)
 		if err := tx.WithContext(ctx).
 			Clauses(clause.OnConflict{DoNothing: true}).
-			CreateInBatches(&newLogs, 200).Error; err != nil {
+			CreateInBatches(&newLogs, 1000).Error; err != nil {
 			return err
 		}
-		if err := UpsertUserFirstSeenFromLogs(ctx, tx, newLogs); err != nil {
-			return err
+		if hasAnyUser(newLogs) {
+			if err := UpsertUserFirstSeenFromLogs(ctx, tx, newLogs); err != nil {
+				return err
+			}
 		}
 		if err := UpsertLogMetricsFromLogs(ctx, tx, newLogs); err != nil {
 			return err
@@ -105,6 +107,15 @@ func InsertLogsAndTrackEventsBatch(ctx context.Context, db *gorm.DB, logs []mode
 		return nil, err
 	}
 	return kept, nil
+}
+
+func hasAnyUser(logs []model.Log) bool {
+	for _, l := range logs {
+		if strings.TrimSpace(l.DistinctID) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func lockLogIngestIDs(ctx context.Context, db *gorm.DB, logs []model.Log) error {

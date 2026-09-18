@@ -56,7 +56,7 @@ func InsertEventsBatch(ctx context.Context, db *gorm.DB, rows []model.Event) ([]
 		}
 		if err := tx.WithContext(ctx).
 			Clauses(clause.OnConflict{DoNothing: true}).
-			CreateInBatches(&newRows, 200).Error; err != nil {
+			CreateInBatches(&newRows, 1000).Error; err != nil {
 			return err
 		}
 		if err := UpsertUserFirstSeenFromEvents(ctx, tx, newRows); err != nil {
