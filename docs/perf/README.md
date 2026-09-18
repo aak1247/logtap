@@ -6,7 +6,7 @@
 
 ## 〇、架构分层与版本定位 (PostgreSQL vs ClickHouse)
 
-![存储引擎架构对比](assets/edition-benchmark-comparison.svg)
+![存储引擎架构对比](assets/edition-benchmark-comparison-zh.svg)
 
 - **开源版 (PostgreSQL / TimescaleDB)**：主打**零额外组件、运维极简**，为中小团队及单节点自建设计，持续稳定承载 **1万 ~ 2万 EPS**；
 - **企业版 / 云端版 (ClickHouse)**：专为**海量高吞吐（10万 ~ 30万+ EPS）**设计，利用列式存储与 LSM 树批量极速落盘，并提供 5~10 倍极致数据压缩（节省 70%~85% 存储成本）与秒级多维分析能力。
@@ -42,7 +42,7 @@
 
 测试方式：每个客户端 (VU) 以严格 1 秒的恒定节奏发送请求（每请求 50 条日志，每个 VU 产生 50 EPS），阶梯加压至 240 VU。
 
-![并发-EPS与P95延迟拐点图](assets/ingest-load-curve.svg)
+![并发-EPS与P95延迟拐点图](assets/ingest-load-curve-zh.svg)
 
 | 并发数 (VUs) | 目标 EPS | 实际 EPS | P50 延迟 | P95 延迟 | P99 延迟 | 错误率 |
 |---:|---:|---:|---:|---:|---:|---:|
@@ -61,7 +61,7 @@
 
 在恒定 ~5,000 EPS 目标压力下，对比单条发送与不同攒批策略下的延迟与吞吐开销：
 
-![Batch Size 影响对比](assets/batch-comparison.svg)
+![Batch Size 影响对比](assets/batch-comparison-zh.svg)
 
 - **结论**：Batch Size 过小（如 1 或 10）会导致大量 HTTP 头部开销与网络往返；推荐客户端批量设置为 **50 ~ 200 条/请求**。
 
@@ -69,7 +69,7 @@
 
 测试包含数十万级历史日志数据的数据库性能：
 
-![查询性能基准](assets/query-benchmark.svg)
+![查询性能基准](assets/query-benchmark-zh.svg)
 
 | 查询场景 | 接口 / 索引类型 | 稳定 QPS | P50 耗时 | P95 耗时 |
 |---|---|---:|---:|---:|

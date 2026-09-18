@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 380" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif">
 <rect width="840" height="380" fill="#ffffff"/>
-<text x="420.0" y="32" text-anchor="middle" font-size="17" font-weight="700" fill="#111827">Storage Engine Architecture: Open Source (PostgreSQL) vs Enterprise (ClickHouse)</text>
-<text x="420.0" y="50" text-anchor="middle" font-size="11.5" fill="#6b7280">Clear positioning between self-hosted simplicity and massive production scale</text>
+<text x="420.0" y="32" text-anchor="middle" font-size="17" font-weight="700" fill="#111827">存储引擎架构对比：开源版 (PostgreSQL) vs 企业版 (ClickHouse)</text>
+<text x="420.0" y="50" text-anchor="middle" font-size="11.5" fill="#6b7280">轻量自建与海量生产级的差异化定位 · 写入吞吐与存储成本双重对比</text>
 <rect x="65" y="80" width="330" height="220" fill="#f9fafb" rx="4"/>
 <line x1="65" y1="300.0" x2="395" y2="300.0" stroke="#e5e7eb" stroke-width="1"/>
 <text x="57" y="304.0" text-anchor="end" font-size="10" fill="#6b7280">0k</text>
@@ -20,8 +20,8 @@
 <text x="230.0" y="316" text-anchor="middle" font-size="10" fill="#4b5563">100 VU</text>
 <text x="312.5" y="316" text-anchor="middle" font-size="10" fill="#4b5563">200 VU</text>
 <text x="395.0" y="316" text-anchor="middle" font-size="10" fill="#4b5563">400 VU</text>
-<text x="230.0" y="332" text-anchor="middle" font-size="11" font-weight="500" fill="#374151">Client Concurrency Load</text>
-<text x="30" y="72" font-size="11" font-weight="600" fill="#374151">Sustained EPS</text>
+<text x="230.0" y="332" text-anchor="middle" font-size="11" font-weight="500" fill="#374151">客户端并发负载</text>
+<text x="30" y="72" font-size="11" font-weight="600" fill="#374151">持续落盘 EPS</text>
 <path d="M 65.0 298.9 L 147.5 292.3 L 230.0 281.3 L 312.5 273.6 L 395.0 272.5" fill="none" stroke="#6366f1" stroke-width="2.5"/>
 <circle cx="65.0" cy="298.9" r="3.5" fill="#ffffff" stroke="#6366f1" stroke-width="2"/>
 <circle cx="147.5" cy="292.3" r="3.5" fill="#ffffff" stroke="#6366f1" stroke-width="2"/>
@@ -34,12 +34,12 @@
 <circle cx="230.0" cy="223.0" r="3.5" fill="#ffffff" stroke="#10b981" stroke-width="2"/>
 <circle cx="312.5" cy="146.0" r="3.5" fill="#ffffff" stroke="#10b981" stroke-width="2"/>
 <circle cx="395.0" cy="69.0" r="3.5" fill="#ffffff" stroke="#10b981" stroke-width="2"/>
-<rect x="205" y="250" width="180" height="20" fill="#e0e7ff" rx="3"/>
-<text x="295.0" y="264" text-anchor="middle" font-size="10" font-weight="600" fill="#3730a3">PG Plateau: 10k ~ 15k EPS</text>
-<rect x="225" y="95" width="170" height="20" fill="#d1fae5" rx="3"/>
-<text x="310.0" y="109" text-anchor="middle" font-size="10" font-weight="700" fill="#065f46">CK Linear Scale: 100k+ EPS</text>
+<rect x="205" y="250" width="165" height="20" fill="#e0e7ff" rx="3"/>
+<text x="287.5" y="264" text-anchor="middle" font-size="10" font-weight="600" fill="#3730a3">PG版平台期: 1万 ~ 1.5万 EPS</text>
+<rect x="225" y="95" width="150" height="20" fill="#d1fae5" rx="3"/>
+<text x="300.0" y="109" text-anchor="middle" font-size="10" font-weight="700" fill="#065f46">CK版线性冲刺: 10万+ EPS</text>
 <rect x="480" y="80" width="310" height="220" fill="#f9fafb" rx="4"/>
-<text x="635.0" y="72" text-anchor="middle" font-size="11.5" font-weight="600" fill="#374151">Disk Space for 100 Million Logs (GB)</text>
+<text x="635.0" y="72" text-anchor="middle" font-size="11.5" font-weight="600" fill="#374151">存储 1 亿条日志所需磁盘空间 (GB)</text>
 <line x1="480" y1="300.0" x2="790" y2="300.0" stroke="#e5e7eb" stroke-width="1"/>
 <text x="472" y="304.0" text-anchor="end" font-size="10" fill="#6b7280">0G</text>
 <line x1="480" y1="245.0" x2="790" y2="245.0" stroke="#e5e7eb" stroke-width="1"/>
@@ -54,17 +54,17 @@
 <rect x="525" y="124.0" width="64" height="176.0" fill="#818cf8" rx="3"/>
 <text x="557.0" y="116.0" text-anchor="middle" font-size="12" font-weight="700" fill="#3730a3">32.0 GB</text>
 <text x="557.0" y="318" text-anchor="middle" font-size="11" font-weight="500" fill="#374151">PostgreSQL</text>
-<text x="557.0" y="332" text-anchor="middle" font-size="9.5" fill="#6b7280">Row-store + BTree/GIN</text>
+<text x="557.0" y="332" text-anchor="middle" font-size="9.5" fill="#6b7280">行存 + BTree/GIN</text>
 <rect x="660" y="273.6" width="64" height="26.4" fill="#34d399" rx="3"/>
 <text x="692.0" y="265.6" text-anchor="middle" font-size="12" font-weight="700" fill="#065f46">4.8 GB</text>
 <text x="692.0" y="318" text-anchor="middle" font-size="11" font-weight="500" fill="#374151">ClickHouse</text>
-<text x="692.0" y="332" text-anchor="middle" font-size="9.5" fill="#6b7280">Column-store + ZSTD</text>
-<rect x="619.5" y="237.60000000000002" width="145" height="22" fill="#d1fae5" stroke="#6ee7b7" rx="4"/>
-<text x="692.0" y="252.60000000000002" text-anchor="middle" font-size="10.5" font-weight="700" fill="#047857">Saves 85% Disk Cost</text>
+<text x="692.0" y="332" text-anchor="middle" font-size="9.5" fill="#6b7280">列存 + ZSTD 压缩</text>
+<rect x="627.0" y="237.60000000000002" width="130" height="22" fill="#d1fae5" stroke="#6ee7b7" rx="4"/>
+<text x="692.0" y="252.60000000000002" text-anchor="middle" font-size="10.5" font-weight="700" fill="#047857">节省 85% 存储成本</text>
 <line x1="250.0" y1="362" x2="275.0" y2="362" stroke="#6366f1" stroke-width="2.5"/>
 <circle cx="262.5" cy="362" r="3.5" fill="#ffffff" stroke="#6366f1" stroke-width="2"/>
-<text x="285.0" y="366" font-size="11" fill="#374151">Open Source (PostgreSQL / TimescaleDB)</text>
+<text x="285.0" y="366" font-size="11" fill="#374151">开源版 (PostgreSQL / TimescaleDB)</text>
 <line x1="500.0" y1="362" x2="525.0" y2="362" stroke="#10b981" stroke-width="2.5"/>
 <circle cx="512.5" cy="362" r="3.5" fill="#ffffff" stroke="#10b981" stroke-width="2"/>
-<text x="535.0" y="366" font-size="11" fill="#374151">Enterprise / Cloud (ClickHouse)</text>
+<text x="535.0" y="366" font-size="11" fill="#374151">企业版 / 云端版 (ClickHouse)</text>
 </svg>

@@ -225,7 +225,7 @@ docker compose up --build
 - **开源版（当前默认）**：基于 **PostgreSQL / TimescaleDB**，主打**零额外运维负担、开箱即用**，适合单节点或中小型团队自建；
 - **企业版 / 云端版**：基于 **ClickHouse 列式存储引擎**，专为**海量高吞吐（10万 ~ 30万+ EPS）与低成本长周期存储**设计。
 
-![存储引擎架构对比](docs/perf/assets/edition-benchmark-comparison.svg)
+![存储引擎架构对比](docs/perf/assets/edition-benchmark-comparison-zh.svg)
 
 ### 双版本规格定位矩阵
 
@@ -247,7 +247,7 @@ docker compose up --build
 
 客户端以严格恒定的 1 秒节奏发送请求（每请求 50 条日志，每个 VU 产生 50 EPS）。并发在 10 ~ 120 VU 之间时，系统吞吐量从 500 严格线性攀升至 5,600 EPS，**P95 延迟始终稳定在 2ms 以内**；在 160 VU（约 7,500 EPS）附近捕获到清晰的**性能拐点**。
 
-![日志写入并发-EPS与延迟拐点图](docs/perf/assets/ingest-load-curve.svg)
+![日志写入并发-EPS与延迟拐点图](docs/perf/assets/ingest-load-curve-zh.svg)
 
 | 并发客户端数 (VUs) | 目标 EPS | 实际 EPS | P50 延迟 | P95 延迟 | P99 延迟 | 错误率 |
 |---:|---:|---:|---:|---:|---:|---:|
@@ -264,13 +264,13 @@ docker compose up --build
 
 在恒定 ~5,000 EPS 日志写入负载下，不同客户端攒批大小对吞吐与长尾延迟的影响。生产环境推荐设置为 **50 ~ 200 条/请求**：
 
-![Batch Size 影响对比](docs/perf/assets/batch-comparison.svg)
+![Batch Size 影响对比](docs/perf/assets/batch-comparison-zh.svg)
 
 #### 3. 查询与多维分析场景性能 (10 并发查询客户端)
 
 在含有数十万级历史日志数据的真实数据库环境下的查询表现：
 
-![查询性能基准](docs/perf/assets/query-benchmark.svg)
+![查询性能基准](docs/perf/assets/query-benchmark-zh.svg)
 
 | 查询场景 | 接口 / 索引类型 | 稳定 QPS | P50 耗时 | P95 耗时 |
 |---|---|---:|---:|---:|

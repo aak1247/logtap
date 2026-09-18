@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 440" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif">
 <rect width="820" height="440" fill="#ffffff"/>
-<text x="410.0" y="36" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2937">Ingest Load: Concurrency vs. EPS & P95 Latency</text>
-<text x="410.0" y="56" text-anchor="middle" font-size="12" fill="#6b7280">Paced 1s client cadence (Batch=50) tiered concurrency · Capturing system throughput knee</text>
+<text x="410.0" y="36" text-anchor="middle" font-size="18" font-weight="700" fill="#1f2937">日志写入：并发 - EPS & P95 延迟曲线</text>
+<text x="410.0" y="56" text-anchor="middle" font-size="12" fill="#6b7280">固定节奏客户端 (1s/次, Batch=50) 阶梯并发压测 · 捕获系统性能拐点</text>
 <line x1="80" y1="370.0" x2="740" y2="370.0" stroke="#f3f4f6" stroke-width="1"/>
 <text x="68" y="374.0" text-anchor="end" font-size="11" fill="#6b7280">0</text>
 <line x1="80" y1="320.0" x2="740" y2="320.0" stroke="#f3f4f6" stroke-width="1"/>
@@ -22,8 +22,8 @@
 <text x="752" y="194.0" text-anchor="start" font-size="11" fill="#f59e0b">1500 ms</text>
 <text x="752" y="134.0" text-anchor="start" font-size="11" fill="#f59e0b">2000 ms</text>
 <text x="752" y="74.0" text-anchor="start" font-size="11" fill="#f59e0b">2500 ms</text>
-<text x="35" y="56" font-size="12" font-weight="600" fill="#4b5563">Throughput (EPS)</text>
-<text x="744" y="56" font-size="12" font-weight="600" fill="#d97706">P95 Latency</text>
+<text x="35" y="56" font-size="12" font-weight="600" fill="#4b5563">吞吐量 (EPS)</text>
+<text x="744" y="56" font-size="12" font-weight="600" fill="#d97706">P95 延迟</text>
 <line x1="80" y1="370" x2="740" y2="370" stroke="#9ca3af" stroke-width="1.2"/>
 <line x1="80" y1="70" x2="80" y2="370" stroke="#9ca3af" stroke-width="1.2"/>
 <line x1="740" y1="70" x2="740" y2="370" stroke="#9ca3af" stroke-width="1.2"/>
@@ -51,7 +51,7 @@
 <rect x="677.3" y="90.0" width="42.9" height="280.0" fill="#fed7aa" opacity="0.88" rx="2"/>
 <text x="698.8" y="84.0" text-anchor="middle" font-size="11" font-weight="600" fill="#b45309">11200</text>
 <text x="698.8" y="390" text-anchor="middle" font-size="12" font-weight="500" fill="#374151">240</text>
-<text x="410.0" y="416" text-anchor="middle" font-size="13" font-weight="600" fill="#4b5563">Client Concurrency (VUs)</text>
+<text x="410.0" y="416" text-anchor="middle" font-size="13" font-weight="600" fill="#4b5563">并发客户端数 (VUs)</text>
 <path d="M 121.2 369.8 L 203.8 369.8 L 286.2 369.8 L 368.8 369.8 L 451.2 369.8 L 533.8 350.3 L 616.2 131.3 L 698.8 244.9" fill="none" stroke="#ea580c" stroke-width="2.5" stroke-linejoin="round"/>
 <circle cx="121.2" cy="369.8" r="4" fill="#ffffff" stroke="#ea580c" stroke-width="2"/>
 <circle cx="203.8" cy="369.8" r="4" fill="#ffffff" stroke="#ea580c" stroke-width="2"/>
@@ -62,11 +62,11 @@
 <circle cx="616.2" cy="131.3" r="4" fill="#ffffff" stroke="#ea580c" stroke-width="2"/>
 <circle cx="698.8" cy="244.9" r="4" fill="#ffffff" stroke="#ea580c" stroke-width="2"/>
 <line x1="533.8" y1="350.332" x2="533.8" y2="370" stroke="#ef4444" stroke-width="1.2" stroke-dasharray="3,3"/>
-<rect x="446.2" y="312.3" width="175" height="26" fill="#fee2e2" stroke="#f87171" rx="4"/>
-<text x="533.8" y="329.3" text-anchor="middle" font-size="11" font-weight="700" fill="#b91c1c">★ Performance Knee (~7.5k EPS)</text>
+<rect x="471.2" y="312.3" width="125" height="26" fill="#fee2e2" stroke="#f87171" rx="4"/>
+<text x="533.8" y="329.3" text-anchor="middle" font-size="11" font-weight="700" fill="#b91c1c">★ 性能拐点 (~7.5k EPS)</text>
 <rect x="92" y="80" width="16" height="12" fill="#fed7aa" rx="2"/>
-<text x="114" y="90" font-size="11" fill="#4b5563">Throughput (EPS)</text>
+<text x="114" y="90" font-size="11" fill="#4b5563">吞吐量 (EPS)</text>
 <line x1="225" y1="86" x2="250" y2="86" stroke="#ea580c" stroke-width="2.5"/>
 <circle cx="237.5" cy="86" r="3.5" fill="#ffffff" stroke="#ea580c" stroke-width="1.8"/>
-<text x="257" y="90" font-size="11" fill="#4b5563">P95 Latency (ms)</text>
+<text x="257" y="90" font-size="11" fill="#4b5563">P95 延迟 (ms)</text>
 </svg>
