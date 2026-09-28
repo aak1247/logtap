@@ -128,10 +128,20 @@ func TestExportAndApplyProjectBundle(t *testing.T) {
 	if err := json.Unmarshal(importedRule.Targets, &importedTargets); err != nil {
 		t.Fatalf("decode imported targets: %v", err)
 	}
-	if len(importedTargets.WebhookEndpointIDs) != 1 || importedTargets.WebhookEndpointIDs[0] != importedEndpoint.ID {
-		t.Fatalf("targets were not remapped: %+v endpoint=%d", importedTargets, importedEndpoint.ID)
+		if len(importedTargets.WebhookEndpointIDs) != 1 || importedTargets.WebhookEndpointIDs[0] != importedEndpoint.ID {
+			t.Fatalf("targets were not remapped: %+v endpoint=%d", importedTargets, importedEndpoint.ID)
+		}
+
+		// Re-apply to test idempotency
+		if _, err := ApplyProjectBundle(ctx, targetDB, target.ID, bundle.Projects[0]); err != nil {
+			t.Fatalf("ApplyProjectBundle second time: %v", err)
+		}
+		var rulesCount int64
+		_ = targetDB.Model(&model.AlertRule{}).Where("project_id = ?", target.ID).Count(&rulesCount)
+		if rulesCount != 1 {
+			t.Fatalf("expected exactly 1 alert rule after re-apply, got %d", rulesCount)
+		}
 	}
-}
 
 func TestExportBundleWithoutOwnerExportsAllNonSystemProjects(t *testing.T) {
 	db := openMigrationTestDB(t, "no-owner")

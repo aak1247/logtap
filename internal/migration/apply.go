@@ -111,14 +111,26 @@ func applyProjectConfig(ctx context.Context, tx *gorm.DB, projectID int, cfg Pro
 	}
 
 	for _, r := range cfg.AnalysisViews {
-		row := model.AnalysisView{
-			ProjectID: projectID, Name: r.Name, Description: r.Description, AnalysisType: r.AnalysisType,
-			Query: datatypes.JSON(rawDefault(r.Query, "{}")),
-		}
-		if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
+		var existing model.AnalysisView
+		err := tx.WithContext(ctx).Where("project_id = ? AND name = ?", projectID, r.Name).First(&existing).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			row := model.AnalysisView{
+				ProjectID: projectID, Name: r.Name, Description: r.Description, AnalysisType: r.AnalysisType,
+				Query: datatypes.JSON(rawDefault(r.Query, "{}")),
+			}
+			if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
+				return err
+			}
+			res.Inserted["analysis_views"]++
+		} else if err == nil {
+			_ = tx.WithContext(ctx).Model(&existing).Updates(map[string]any{
+				"description":   r.Description,
+				"analysis_type": r.AnalysisType,
+				"query":         datatypes.JSON(rawDefault(r.Query, "{}")),
+			}).Error
+		} else {
 			return err
 		}
-		res.Inserted["analysis_views"]++
 	}
 
 	for _, r := range cfg.PluginPackageSettings {
@@ -211,15 +223,29 @@ func applyAlertConfig(ctx context.Context, tx *gorm.DB, projectID int, cfg Proje
 			enabled = false
 			res.Warnings = append(res.Warnings, fmt.Sprintf("alert rule %q disabled because some targets could not be remapped", r.Name))
 		}
-		row := model.AlertRule{
-			ProjectID: projectID, Name: r.Name, Enabled: enabled, Source: r.Source,
-			Match: datatypes.JSON(rawDefault(r.Match, "{}")), Repeat: datatypes.JSON(rawDefault(r.Repeat, "{}")),
-			Targets: datatypes.JSON(targets),
-		}
-		if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
+		var existing model.AlertRule
+		err := tx.WithContext(ctx).Where("project_id = ? AND name = ?", projectID, r.Name).First(&existing).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			row := model.AlertRule{
+				ProjectID: projectID, Name: r.Name, Enabled: enabled, Source: r.Source,
+				Match: datatypes.JSON(rawDefault(r.Match, "{}")), Repeat: datatypes.JSON(rawDefault(r.Repeat, "{}")),
+				Targets: datatypes.JSON(targets),
+			}
+			if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
+				return err
+			}
+			res.Inserted["alert_rules"]++
+		} else if err == nil {
+			_ = tx.WithContext(ctx).Model(&existing).Updates(map[string]any{
+				"enabled": enabled,
+				"source":  r.Source,
+				"match":   datatypes.JSON(rawDefault(r.Match, "{}")),
+				"repeat":  datatypes.JSON(rawDefault(r.Repeat, "{}")),
+				"targets": datatypes.JSON(targets),
+			}).Error
+		} else {
 			return err
 		}
-		res.Inserted["alert_rules"]++
 	}
 	return nil
 }
@@ -230,15 +256,30 @@ func applyMonitorConfig(ctx context.Context, tx *gorm.DB, projectID int, cfg Pro
 		if nextRunAt.IsZero() {
 			nextRunAt = time.Now().UTC()
 		}
-		row := model.MonitorDefinition{
-			ProjectID: projectID, Name: r.Name, DetectorType: r.DetectorType,
-			Config: datatypes.JSON(rawDefault(r.Config, "{}")), IntervalSec: r.IntervalSec, TimeoutMS: r.TimeoutMS,
-			Enabled: r.Enabled, NextRunAt: nextRunAt,
-		}
-		if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
+		var existing model.MonitorDefinition
+		err := tx.WithContext(ctx).Where("project_id = ? AND name = ?", projectID, r.Name).First(&existing).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			row := model.MonitorDefinition{
+				ProjectID: projectID, Name: r.Name, DetectorType: r.DetectorType,
+				Config: datatypes.JSON(rawDefault(r.Config, "{}")), IntervalSec: r.IntervalSec, TimeoutMS: r.TimeoutMS,
+				Enabled: r.Enabled, NextRunAt: nextRunAt,
+			}
+			if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
+				return err
+			}
+			res.Inserted["monitor_definitions"]++
+		} else if err == nil {
+			_ = tx.WithContext(ctx).Model(&existing).Updates(map[string]any{
+				"detector_type": r.DetectorType,
+				"config":        datatypes.JSON(rawDefault(r.Config, "{}")),
+				"interval_sec":  r.IntervalSec,
+				"timeout_ms":    r.TimeoutMS,
+				"enabled":       r.Enabled,
+				"next_run_at":   nextRunAt,
+			}).Error
+		} else {
 			return err
 		}
-		res.Inserted["monitor_definitions"]++
 	}
 	return nil
 }

@@ -150,63 +150,97 @@ func exportProject(ctx context.Context, db *gorm.DB, p model.Project, opts Expor
 }
 
 func exportLogs(ctx context.Context, db *gorm.DB, projectID int, since *time.Time, until *time.Time, pb *ProjectBundle) error {
-	q := db.WithContext(ctx).Where("project_id = ?", projectID)
-	if since != nil && !since.IsZero() {
-		q = q.Where("timestamp >= ?", since.UTC())
-	}
-	if until != nil && !until.IsZero() {
-		q = q.Where("timestamp <= ?", until.UTC())
-	}
-	var rows []model.Log
-	if err := q.Order("timestamp ASC, id ASC").Find(&rows).Error; err != nil {
-		return err
-	}
-	pb.Logs = make([]LogRecord, 0, len(rows))
-	for _, r := range rows {
-		pb.Logs = append(pb.Logs, LogRecord{
-			SourceID:   r.ID,
-			Timestamp:  r.Timestamp.UTC(),
-			IngestID:   r.IngestID,
-			Level:      r.Level,
-			DistinctID: r.DistinctID,
-			DeviceID:   r.DeviceID,
-			TraceID:    r.TraceID,
-			SpanID:     r.SpanID,
-			Message:    r.Message,
-			Fields:     rawOrObject(r.Fields),
-		})
+	const batchSize = 5000
+	pb.Logs = make([]LogRecord, 0)
+	var lastTime time.Time
+	var lastID int64
+
+	for {
+		q := db.WithContext(ctx).Where("project_id = ?", projectID)
+		if since != nil && !since.IsZero() {
+			q = q.Where("timestamp >= ?", since.UTC())
+		}
+		if until != nil && !until.IsZero() {
+			q = q.Where("timestamp <= ?", until.UTC())
+		}
+		if !lastTime.IsZero() {
+			q = q.Where("(timestamp > ?) OR (timestamp = ? AND id > ?)", lastTime, lastTime, lastID)
+		}
+		var batch []model.Log
+		if err := q.Order("timestamp ASC, id ASC").Limit(batchSize).Find(&batch).Error; err != nil {
+			return err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		for _, r := range batch {
+			pb.Logs = append(pb.Logs, LogRecord{
+				SourceID:   r.ID,
+				Timestamp:  r.Timestamp.UTC(),
+				IngestID:   r.IngestID,
+				Level:      r.Level,
+				DistinctID: r.DistinctID,
+				DeviceID:   r.DeviceID,
+				TraceID:    r.TraceID,
+				SpanID:     r.SpanID,
+				Message:    r.Message,
+				Fields:     rawOrObject(r.Fields),
+			})
+			lastTime = r.Timestamp.UTC()
+			lastID = r.ID
+		}
+		if len(batch) < batchSize {
+			break
+		}
 	}
 	return nil
 }
 
 func exportEvents(ctx context.Context, db *gorm.DB, projectID int, since *time.Time, until *time.Time, pb *ProjectBundle) error {
-	q := db.WithContext(ctx).Where("project_id = ?", projectID)
-	if since != nil && !since.IsZero() {
-		q = q.Where("timestamp >= ?", since.UTC())
-	}
-	if until != nil && !until.IsZero() {
-		q = q.Where("timestamp <= ?", until.UTC())
-	}
-	var rows []model.Event
-	if err := q.Order("timestamp ASC, id ASC").Find(&rows).Error; err != nil {
-		return err
-	}
-	pb.Events = make([]EventRecord, 0, len(rows))
-	for _, r := range rows {
-		pb.Events = append(pb.Events, EventRecord{
-			ID:          r.ID,
-			Timestamp:   r.Timestamp.UTC(),
-			Level:       r.Level,
-			DistinctID:  r.DistinctID,
-			DeviceID:    r.DeviceID,
-			OS:          r.OS,
-			Platform:    r.Platform,
-			ReleaseTag:  r.ReleaseTag,
-			Environment: r.Environment,
-			UserID:      r.UserID,
-			Title:       r.Title,
-			Data:        rawOrObject(r.Data),
-		})
+	const batchSize = 5000
+	pb.Events = make([]EventRecord, 0)
+	var lastTime time.Time
+	var lastID string
+
+	for {
+		q := db.WithContext(ctx).Where("project_id = ?", projectID)
+		if since != nil && !since.IsZero() {
+			q = q.Where("timestamp >= ?", since.UTC())
+		}
+		if until != nil && !until.IsZero() {
+			q = q.Where("timestamp <= ?", until.UTC())
+		}
+		if !lastTime.IsZero() {
+			q = q.Where("(timestamp > ?) OR (timestamp = ? AND id > ?)", lastTime, lastTime, lastID)
+		}
+		var batch []model.Event
+		if err := q.Order("timestamp ASC, id ASC").Limit(batchSize).Find(&batch).Error; err != nil {
+			return err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		for _, r := range batch {
+			pb.Events = append(pb.Events, EventRecord{
+				ID:          r.ID,
+				Timestamp:   r.Timestamp.UTC(),
+				Level:       r.Level,
+				DistinctID:  r.DistinctID,
+				DeviceID:    r.DeviceID,
+				OS:          r.OS,
+				Platform:    r.Platform,
+				ReleaseTag:  r.ReleaseTag,
+				Environment: r.Environment,
+				UserID:      r.UserID,
+				Title:       r.Title,
+				Data:        rawOrObject(r.Data),
+			})
+			lastTime = r.Timestamp.UTC()
+			lastID = r.ID.String()
+		}
+		if len(batch) < batchSize {
+			break
+		}
 	}
 	return nil
 }

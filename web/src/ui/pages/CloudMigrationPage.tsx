@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   previewCloudMigration,
   startCloudMigration,
+  getCloudImportJobStatus,
   type MigrationPreview,
   type MigrationPreviewProject,
 } from "../../lib/api";
@@ -21,6 +22,42 @@ export function CloudMigrationPanel() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [result, setResult] = useState<{ job_id: string; status: string; status_url?: string } | null>(null);
+  const [jobDetail, setJobDetail] = useState<{
+    job_id: string;
+    status: string;
+    error_message?: string;
+    result_summary?: unknown;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!result?.job_id || !cloudToken.trim() || !cloudURL.trim()) {
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const detail = await getCloudImportJobStatus(cloudURL, cloudToken, result.job_id);
+        if (cancelled) return;
+        setJobDetail(detail);
+        if (detail.status === "completed" || detail.status === "failed") {
+          return;
+        }
+      } catch {
+        // silent retry on network hiccups
+      }
+      if (!cancelled) {
+        timer = setTimeout(poll, 2000);
+      }
+    };
+
+    poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [result?.job_id, cloudURL, cloudToken]);
 
   useEffect(() => {
     if (!settings.token) {
@@ -92,18 +129,55 @@ export function CloudMigrationPanel() {
 
       {err ? <div className="rounded-md border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-200">{err}</div> : null}
       {result ? (
-        <div className="rounded-md border border-emerald-900/60 bg-emerald-950/30 p-3 text-sm text-emerald-100">
-          已创建导入任务：<span className="font-mono">{result.job_id}</span>
-          <div className="mt-2">
+        <div
+          className={`rounded-md border p-4 text-sm ${
+            jobDetail?.status === "failed"
+              ? "border-red-900/60 bg-red-950/40 text-red-200"
+              : jobDetail?.status === "completed"
+              ? "border-emerald-900/60 bg-emerald-950/40 text-emerald-100"
+              : "border-blue-900/60 bg-blue-950/30 text-blue-100"
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold">迁移任务：</span>
+              <span className="font-mono text-xs opacity-90">{result.job_id}</span>
+              <span
+                className={`rounded px-2 py-0.5 text-xs font-medium ${
+                  jobDetail?.status === "failed"
+                    ? "bg-red-900/60 text-red-200"
+                    : jobDetail?.status === "completed"
+                    ? "bg-emerald-800/60 text-emerald-200"
+                    : "bg-blue-800/60 text-blue-200 animate-pulse"
+                }`}
+              >
+                {jobDetail?.status === "completed"
+                  ? "已完成"
+                  : jobDetail?.status === "failed"
+                  ? "失败"
+                  : jobDetail?.status === "running"
+                  ? "正在导入与重建指标..."
+                  : "等待执行..."}
+              </span>
+            </div>
             <a
-              className="btn btn-xs btn-outline border-emerald-900/60 text-emerald-100 hover:bg-emerald-950/40"
-              href={cloudImportJobURL(cloudURL, result.job_id)}
+              className="btn btn-xs btn-outline border-current hover:bg-white/10"
+              href={`${cloudURL.replace(/\/+$/, "")}/settings/imports`}
               target="_blank"
               rel="noreferrer"
             >
-              查看导入进度
+              在 Cloud 中查看
             </a>
           </div>
+
+          {jobDetail?.status === "failed" && jobDetail.error_message ? (
+            <div className="mt-2 text-xs text-red-300">失败原因：{jobDetail.error_message}</div>
+          ) : null}
+          {jobDetail?.status === "completed" ? (
+            <div className="mt-2 text-xs text-emerald-300">
+              数据已全部导入完毕，项目与密钥已在 Cloud 中就绪。
+            </div>
+          ) : null}
         </div>
       ) : null}
 

@@ -1177,6 +1177,24 @@ export async function startCloudMigration(
   });
 }
 
+export async function getCloudImportJobStatus(
+  cloudBase: string,
+  token: string,
+  jobId: string,
+): Promise<{
+  job_id: string;
+  status: string;
+  status_url?: string;
+  projects_count?: number;
+  result_summary?: unknown;
+  error_message?: string;
+}> {
+  return fetchJSON(
+    `${cloudBase.replace(/\/+$/, "")}/api/imports/local-logtap/${encodeURIComponent(jobId)}`,
+    token,
+  );
+}
+
 export async function createProject(
   s: ApiSettings,
   name: string,
