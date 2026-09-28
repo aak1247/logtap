@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/aak1247/logtap/internal/detector"
 	"github.com/aak1247/logtap/internal/model"
@@ -15,7 +16,18 @@ type Options struct {
 	RequireTimescale bool
 }
 
+// migrateAdvisoryLockKey serializes schema migrations between overlapping
+// replicas (e.g. during a rolling update); concurrent first-boot AutoMigrate
+// otherwise races on pg_type and can crash either pod.
+const migrateAdvisoryLockKey = int64(0x6c6f677461702d6d) // "logtap-m"
+
 func AutoMigrate(ctx context.Context, db *gorm.DB, opts Options) error {
+	unlock, err := lockSchemaMigration(ctx, db)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	gdb := db.WithContext(ctx)
 	timescaleInstalled := false
 	if strings.EqualFold(db.Dialector.Name(), "postgres") {
@@ -124,6 +136,35 @@ func AutoMigrate(ctx context.Context, db *gorm.DB, opts Options) error {
 	}
 
 	return nil
+}
+
+// lockSchemaMigration takes a session-scoped pg advisory lock on a dedicated
+// connection (not the pool, since GORM may run each migration statement on a
+// different connection). No-op on non-postgres dialects; sqlite serializes
+// writers via its file lock.
+func lockSchemaMigration(ctx context.Context, db *gorm.DB) (func(), error) {
+	if !strings.EqualFold(db.Dialector.Name(), "postgres") {
+		return func() {}, nil
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("schema lock: %w", err)
+	}
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("schema lock: %w", err)
+	}
+	lockCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	if _, err := conn.ExecContext(lockCtx, "SELECT pg_advisory_lock($1)", migrateAdvisoryLockKey); err != nil {
+		cancel()
+		_ = conn.Close()
+		return nil, fmt.Errorf("schema lock: %w", err)
+	}
+	return func() {
+		defer cancel()
+		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", migrateAdvisoryLockKey)
+		_ = conn.Close()
+	}, nil
 }
 
 func ensureAlertStateUniqueIndex(db *gorm.DB) error {
