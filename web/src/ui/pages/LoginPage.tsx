@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { getSystemStatus, login } from "../../lib/api";
 import { loadSettings, saveSettings } from "../../lib/storage";
 import { Panel } from "../components/Panel";
 import { useLocation, useNavigate } from "react-router-dom";
 
-export function LoginPage() {
+export function LoginPage(props: { footer?: ReactNode } = {}) {
   const initial = useMemo(() => loadSettings(), []);
   const nav = useNavigate();
   const loc = useLocation();
@@ -117,6 +117,7 @@ export function LoginPage() {
             </div>
           </div>
         </Panel>
+        {props.footer}
       </div>
     </div>
   );
