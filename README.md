@@ -15,6 +15,8 @@ English | [简体中文](README.zh-CN.md)
 
 A lightweight Sentry-compatible error reporting and structured logging gateway (Go + Gin + NSQ + TimescaleDB/Postgres).
 
+> 🌐 **Try it online**: [https://logtap.autotask.run/](https://logtap.autotask.run/)
+
 Great for quickly setting up:
 - Sentry SDK compatible error/event reporting (`/store` + `/envelope`)
 - Structured log collection (batch + gzip) and search
@@ -50,7 +52,8 @@ docker compose up --build
 ```
 
 4) Access:
-- API/Console: `http://localhost:8080`
+- Production/Cloud Console: `https://logtap.autotask.run/`
+- Local Self-Hosted Console & API: `http://localhost:8080`
 
 ## Screenshots
 
@@ -295,7 +298,7 @@ OpenAPI after running:
 ## Example Usage
 
 ```bash
-LOGTAP_BASE="http://localhost:8080"
+LOGTAP_BASE="https://logtap.autotask.run" # Or http://localhost:8080 for local self-hosted instance
 PROJECT_ID="1"
 PROJECT_KEY="pk_xxx"
 

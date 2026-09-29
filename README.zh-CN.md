@@ -15,6 +15,8 @@
 
 轻量化的 Sentry 兼容上报 + 自定义结构化日志网关（Go + Gin + NSQ + TimescaleDB/Postgres）。
 
+> 🌐 **在线体验**：[https://logtap.autotask.run/](https://logtap.autotask.run/)
+
 适合用来快速搭建：
 - Sentry SDK 兼容的错误/事件上报入口（`/store` + `/envelope`）
 - 结构化日志采集（批量 + gzip）与检索
@@ -50,7 +52,8 @@ docker compose up --build
 ```
 
 4) 访问：
-- API/控制台：`http://localhost:8080`
+- 线上/云端控制台：`https://logtap.autotask.run/`
+- 本地自建控制台与 API：`http://localhost:8080`
 
 ## 截图
 
@@ -295,7 +298,7 @@ docker compose up --build
 ## 基本调用示例
 
 ```bash
-LOGTAP_BASE="http://localhost:8080"
+LOGTAP_BASE="https://logtap.autotask.run" # 本地开发/自建可设为 http://localhost:8080
 PROJECT_ID="1"
 PROJECT_KEY="pk_xxx"
 
