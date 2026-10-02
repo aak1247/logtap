@@ -46,7 +46,7 @@ type CustomAnalyticsRequest struct {
 	} `json:"metric"`
 	GroupBy []string `json:"group_by"`
 	Filter  struct {
-		Events     []string                        `json:"events"`
+		Events     []string                       `json:"events"`
 		Properties map[string]CustomPropertyFilter `json:"properties"`
 	} `json:"filter"`
 }
@@ -64,8 +64,8 @@ type CustomAnalyticsSeriesPoint struct {
 
 // CustomAnalyticsSeries represents one logical series (line/bar/segment).
 type CustomAnalyticsSeries struct {
-	Name       string                       `json:"name"`
-	Dimensions map[string]string            `json:"dimensions"`
+	Name       string            `json:"name"`
+	Dimensions map[string]string `json:"dimensions"`
 	Points     []CustomAnalyticsSeriesPoint `json:"points"`
 	Total      int64                        `json:"total"`
 }
@@ -153,15 +153,15 @@ func CustomAnalyticsHandler(db *gorm.DB) gin.HandlerFunc {
 
 		series := buildCustomSeries(rows, metricType, groupBy, propertyKey)
 		respondOK(c, gin.H{
-			"project_id":    projectID,
+			"project_id":   projectID,
 			"analysis_type": analysisType,
-			"metric":        metricType,
-			"granularity":   granularity,
-			"start":         start.UTC().Format(time.RFC3339),
-			"end":           end.UTC().Format(time.RFC3339),
-			"group_by":      groupBy,
-			"property_key":  propertyKey,
-			"series":        series,
+			"metric":       metricType,
+			"granularity":  granularity,
+			"start":        start.UTC().Format(time.RFC3339),
+			"end":          end.UTC().Format(time.RFC3339),
+			"group_by":     groupBy,
+			"property_key": propertyKey,
+			"series":       series,
 		})
 	}
 }
