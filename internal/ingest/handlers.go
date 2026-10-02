@@ -11,16 +11,20 @@ import (
 	"time"
 
 	"github.com/aak1247/logtap/internal/queue"
+	"github.com/aak1247/logtap/internal/tenant"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
 type NSQMessage struct {
-	Type      string          `json:"type"`
-	ProjectID string          `json:"project_id"`
-	Received  time.Time       `json:"received"`
-	Payload   json.RawMessage `json:"payload"`
-	Meta      *MessageMeta    `json:"meta,omitempty"`
+	Type      string `json:"type"`
+	ProjectID string `json:"project_id"`
+	// TenantID is always the open-source default tenant; enterprise builds
+	// populate it from a trusted proxy header (see internal/tenant).
+	TenantID string          `json:"tenant_id,omitempty"`
+	Received time.Time       `json:"received"`
+	Payload  json.RawMessage `json:"payload"`
+	Meta     *MessageMeta    `json:"meta,omitempty"`
 }
 
 type MessageMeta struct {
@@ -80,6 +84,7 @@ func SentryStoreHandler(publisher queue.Publisher) gin.HandlerFunc {
 		payload, _ := json.Marshal(NSQMessage{
 			Type:      "event",
 			ProjectID: c.Param("projectId"),
+			TenantID:  string(tenant.DefaultTenantID),
 			Received:  time.Now().UTC(),
 			Payload:   mustJSON(event),
 			Meta: &MessageMeta{
@@ -123,6 +128,7 @@ func SentryEnvelopeHandler(publisher queue.Publisher) gin.HandlerFunc {
 			payload, _ := json.Marshal(NSQMessage{
 				Type:      "event",
 				ProjectID: c.Param("projectId"),
+				TenantID:  string(tenant.DefaultTenantID),
 				Received:  time.Now().UTC(),
 				Payload:   mustJSON(event),
 				Meta: &MessageMeta{
@@ -139,6 +145,7 @@ func SentryEnvelopeHandler(publisher queue.Publisher) gin.HandlerFunc {
 			payload, _ := json.Marshal(NSQMessage{
 				Type:      "envelope",
 				ProjectID: c.Param("projectId"),
+				TenantID:  string(tenant.DefaultTenantID),
 				Received:  time.Now().UTC(),
 				Payload:   json.RawMessage(mustJSON(map[string]any{"event_id": eventID, "raw": string(body)})),
 				Meta: &MessageMeta{
@@ -188,6 +195,7 @@ func CustomLogHandler(publisher queue.Publisher) gin.HandlerFunc {
 			payload, _ := json.Marshal(NSQMessage{
 				Type:      "log",
 				ProjectID: c.Param("projectId"),
+				TenantID:  string(tenant.DefaultTenantID),
 				Received:  now,
 				Payload:   mustJSON(logPayload),
 				Meta: &MessageMeta{
@@ -262,6 +270,7 @@ func TrackEventHandler(publisher queue.Publisher) gin.HandlerFunc {
 			payload, _ := json.Marshal(NSQMessage{
 				Type:      "log",
 				ProjectID: c.Param("projectId"),
+				TenantID:  string(tenant.DefaultTenantID),
 				Received:  now,
 				Payload:   mustJSON(logPayload),
 				Meta: &MessageMeta{

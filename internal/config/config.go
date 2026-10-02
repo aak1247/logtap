@@ -13,6 +13,17 @@ import (
 	"time"
 )
 
+const (
+	StorageBackendPostgres   = "postgres"
+	StorageBackendDual       = "dual"
+	StorageBackendClickHouse = "clickhouse"
+)
+
+const (
+	CHDedupModeRedis = "redis"
+	CHDedupModeNone  = "none"
+)
+
 type Config struct {
 	HTTPAddr                     string
 	NSQDAddress                  string
@@ -61,6 +72,42 @@ type Config struct {
 	MonitorTickInterval          time.Duration
 	MonitorBatchSize             int
 	MonitorLeaseDuration         time.Duration
+
+	// Storage backend selection: postgres | dual | clickhouse (design doc
+	// docs/CLICKHOUSE_STORAGE_DESIGN.md §5.3). postgres keeps today's
+	// behavior; dual fans messages out to a second ClickHouse consumer;
+	// clickhouse stops the Postgres data-plane consumers.
+	StorageBackend       string
+	ClickHouseDSN        string
+	ClickHouseReadDSN    string
+	CHWriteShards        int
+	CHLogBatchSize       int
+	CHLogFlushInterval   time.Duration
+	CHEventBatchSize     int
+	CHEventFlushInterval time.Duration
+	CHFlushTimeout       time.Duration
+	CHDrainTimeout       time.Duration
+	CHQueueBufferSize    int
+	CHDedupMode          string // redis | none
+	CHEnableSidecars     bool   // drive Redis recorder + alert evaluator from the CH consumer
+	CHLogTTLDays         int
+
+	NSQMaxInFlightCH  int
+	NSQLogChannelCH   string
+	NSQEventChannelCH string
+	CHLogConcurrency  int
+
+	// Backpressure guard: when the observed NSQ topic depth exceeds this,
+	// ingest endpoints answer 503 + Retry-After.
+	NSQDepthAlertThreshold int
+
+	// Query-side concurrency protection for the ClickHouse backend.
+	CHShortQueryMaxConcurrent int
+	CHHeavyQueryMaxConcurrent int
+
+	// Query gray-release routing to ClickHouse (migration Phase 2).
+	QueryBackendProjects []int
+	QueryBackendPercent  int
 
 	// Webhook security (optional). Defaults to denying loopback/private IPs.
 	WebhookAllowLoopback   bool
@@ -179,6 +226,29 @@ Optional: set AUTH_SECRET_FILE=/path/to/secret (file contains the base64 secret)
 		MonitorTickInterval:          parseDurationDefault(getenvDefault("MONITOR_TICK_INTERVAL", "2s"), 2*time.Second),
 		MonitorBatchSize:             parseIntDefault(getenvDefault("MONITOR_BATCH_SIZE", "20"), 20),
 		MonitorLeaseDuration:         parseDurationDefault(getenvDefault("MONITOR_LEASE_DURATION", "60s"), 60*time.Second),
+		StorageBackend:               strings.ToLower(getenvDefault("STORAGE_BACKEND", StorageBackendPostgres)),
+		ClickHouseDSN:                strings.TrimSpace(os.Getenv("CLICKHOUSE_DSN")),
+		ClickHouseReadDSN:            strings.TrimSpace(os.Getenv("CLICKHOUSE_READ_DSN")),
+		CHWriteShards:                parseIntDefault(getenvDefault("CH_WRITE_SHARDS", "2"), 2),
+		CHLogBatchSize:               parseIntDefault(getenvDefault("CH_LOG_BATCH_SIZE", "5000"), 5000),
+		CHLogFlushInterval:           parseDurationDefault(getenvDefault("CH_LOG_FLUSH_INTERVAL", "500ms"), 500*time.Millisecond),
+		CHEventBatchSize:             parseIntDefault(getenvDefault("CH_EVENT_BATCH_SIZE", "2000"), 2000),
+		CHEventFlushInterval:         parseDurationDefault(getenvDefault("CH_EVENT_FLUSH_INTERVAL", "500ms"), 500*time.Millisecond),
+		CHFlushTimeout:               parseDurationDefault(getenvDefault("CH_FLUSH_TIMEOUT", "10s"), 10*time.Second),
+		CHDrainTimeout:               parseDurationDefault(getenvDefault("CH_DRAIN_TIMEOUT", "20s"), 20*time.Second),
+		CHQueueBufferSize:            parseIntDefault(getenvDefault("CH_QUEUE_BUFFER_SIZE", "100000"), 100000),
+		CHDedupMode:                  strings.ToLower(getenvDefault("CH_DEDUP_MODE", CHDedupModeRedis)),
+		CHEnableSidecars:             parseBoolDefault(getenvDefault("CH_ENABLE_SIDECARS", "false"), false),
+		CHLogTTLDays:                 parseIntDefault(getenvDefault("CH_LOG_TTL_DAYS", "30"), 30),
+		NSQMaxInFlightCH:             parseIntDefault(getenvDefault("NSQ_MAX_IN_FLIGHT_CH", "50000"), 50000),
+		NSQLogChannelCH:              getenvDefault("NSQ_LOG_CHANNEL_CH", "ch-log-consumer"),
+		NSQEventChannelCH:            getenvDefault("NSQ_EVENT_CHANNEL_CH", "ch-event-consumer"),
+		CHLogConcurrency:             parseIntDefault(getenvDefault("CH_LOG_CONCURRENCY", "50"), 50),
+		NSQDepthAlertThreshold:       parseIntDefault(getenvDefault("NSQ_DEPTH_ALERT_THRESHOLD", "100000"), 100000),
+		CHShortQueryMaxConcurrent:    parseIntDefault(getenvDefault("CH_SHORT_QUERY_MAX_CONCURRENT", "64"), 64),
+		CHHeavyQueryMaxConcurrent:    parseIntDefault(getenvDefault("CH_HEAVY_QUERY_MAX_CONCURRENT", "8"), 8),
+		QueryBackendProjects:         parseIntListEnv(getenvDefault("QUERY_BACKEND_PROJECTS", "")),
+		QueryBackendPercent:          parseIntDefault(getenvDefault("QUERY_BACKEND_PERCENT", "0"), 0),
 		WebhookAllowLoopback:         parseBoolDefault(getenvDefault("WEBHOOK_ALLOW_LOOPBACK", "false"), false),
 		WebhookAllowPrivateIPs:       parseBoolDefault(getenvDefault("WEBHOOK_ALLOW_PRIVATE_IPS", "false"), false),
 		AlertCleanupInterval:         parseDurationDefault(getenvDefault("ALERT_CLEANUP_INTERVAL", "1h"), time.Hour),
@@ -281,6 +351,50 @@ Optional: set AUTH_SECRET_FILE=/path/to/secret (file contains the base64 secret)
 	if cfg.MonitorLeaseDuration <= 0 {
 		cfg.MonitorLeaseDuration = 60 * time.Second
 	}
+	switch cfg.StorageBackend {
+	case StorageBackendPostgres, StorageBackendDual, StorageBackendClickHouse:
+	default:
+		return Config{}, fmt.Errorf("STORAGE_BACKEND must be one of %s|%s|%s, got %q", StorageBackendPostgres, StorageBackendDual, StorageBackendClickHouse, cfg.StorageBackend)
+	}
+	if cfg.StorageBackend != StorageBackendPostgres && cfg.ClickHouseDSN == "" {
+		return Config{}, fmt.Errorf("CLICKHOUSE_DSN is required when STORAGE_BACKEND=%s", cfg.StorageBackend)
+	}
+	if cfg.ClickHouseReadDSN == "" {
+		cfg.ClickHouseReadDSN = cfg.ClickHouseDSN
+	}
+	if cfg.CHDedupMode != CHDedupModeRedis && cfg.CHDedupMode != CHDedupModeNone {
+		return Config{}, fmt.Errorf("CH_DEDUP_MODE must be %s or %s, got %q", CHDedupModeRedis, CHDedupModeNone, cfg.CHDedupMode)
+	}
+	if cfg.NSQMaxInFlightCH <= 0 {
+		cfg.NSQMaxInFlightCH = 50000
+	}
+	if cfg.CHWriteShards <= 0 {
+		cfg.CHWriteShards = 1
+	}
+	if cfg.CHLogBatchSize <= 0 {
+		cfg.CHLogBatchSize = 5000
+	}
+	if cfg.CHEventBatchSize <= 0 {
+		cfg.CHEventBatchSize = 2000
+	}
+	if cfg.CHLogConcurrency <= 0 {
+		cfg.CHLogConcurrency = 1
+	}
+	if cfg.NSQDepthAlertThreshold <= 0 {
+		cfg.NSQDepthAlertThreshold = 100000
+	}
+	if cfg.CHShortQueryMaxConcurrent <= 0 {
+		cfg.CHShortQueryMaxConcurrent = 64
+	}
+	if cfg.CHHeavyQueryMaxConcurrent <= 0 {
+		cfg.CHHeavyQueryMaxConcurrent = 8
+	}
+	if cfg.CHLogTTLDays <= 0 {
+		cfg.CHLogTTLDays = 30
+	}
+	if cfg.QueryBackendPercent < 0 || cfg.QueryBackendPercent > 100 {
+		return Config{}, fmt.Errorf("QUERY_BACKEND_PERCENT must be within [0,100], got %d", cfg.QueryBackendPercent)
+	}
 	return cfg, nil
 }
 
@@ -379,6 +493,24 @@ func parseStringListEnv(raw string) []string {
 			continue
 		}
 		out = append(out, part)
+	}
+	return out
+}
+
+// parseIntListEnv parses a comma/semicolon/space separated list of positive
+// integers, skipping unparsable or non-positive entries.
+func parseIntListEnv(raw string) []int {
+	parts := parseStringListEnv(raw)
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
+		n, err := strconv.Atoi(part)
+		if err != nil || n <= 0 {
+			continue
+		}
+		out = append(out, n)
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

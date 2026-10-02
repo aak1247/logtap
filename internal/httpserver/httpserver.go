@@ -156,7 +156,7 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 			queryAPI.GET("/logs/trend", query.LogTrendHandler(db))
 			// Unified search endpoint (v1: queries logs table via adapter)
 			if db != nil {
-				searchEngine := search.NewEngine(searchpostgres.NewAdapter(db))
+				searchEngine := search.NewEngine(newSearchAdapter(cfg, db))
 				queryAPI.GET("/search", search.SearchHandler(searchEngine))
 			}
 			queryAPI.DELETE("/logs/cleanup", query.CleanupLogsHandler(db))
@@ -242,6 +242,17 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 		WriteTimeout:      300 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
+}
+
+// newSearchAdapter selects the unified-search backend by STORAGE_BACKEND.
+// Only the Postgres adapter exists today; the ClickHouse adapter is wired in
+// by the storage-backend work, so non-postgres backends fall back to
+// Postgres (which stays authoritative until the read cutover) with a warning.
+func newSearchAdapter(cfg config.Config, db *gorm.DB) search.SearchAdapter {
+	if cfg.StorageBackend != config.StorageBackendPostgres {
+		log.Printf("search: STORAGE_BACKEND=%s has no ClickHouse search adapter wired yet; falling back to postgres", cfg.StorageBackend)
+	}
+	return searchpostgres.NewAdapter(db)
 }
 
 func requireAuthReadyMiddleware(db *gorm.DB, authSecret []byte) gin.HandlerFunc {

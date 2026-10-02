@@ -176,6 +176,131 @@ func TestFromEnv_AuthSecretFile_Load(t *testing.T) {
 	}
 }
 
+func TestFromEnv_StorageBackendDefaults(t *testing.T) {
+	t.Setenv("RUN_CONSUMERS", "false")
+	t.Setenv("NSQD_ADDRESS", "127.0.0.1:4150")
+	t.Setenv("AUTH_SECRET", base64.RawStdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("STORAGE_BACKEND", "")
+	t.Setenv("CLICKHOUSE_DSN", "")
+
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatalf("FromEnv: %v", err)
+	}
+	if cfg.StorageBackend != StorageBackendPostgres {
+		t.Fatalf("expected default StorageBackend=%s, got %q", StorageBackendPostgres, cfg.StorageBackend)
+	}
+	if cfg.CHLogBatchSize != 5000 || cfg.CHEventBatchSize != 2000 {
+		t.Fatalf("expected CH batch defaults 5000/2000, got %d/%d", cfg.CHLogBatchSize, cfg.CHEventBatchSize)
+	}
+	if cfg.CHLogFlushInterval != 500*time.Millisecond || cfg.CHEventFlushInterval != 500*time.Millisecond {
+		t.Fatalf("expected CH flush interval defaults 500ms, got %v/%v", cfg.CHLogFlushInterval, cfg.CHEventFlushInterval)
+	}
+	if cfg.NSQMaxInFlightCH != 50000 {
+		t.Fatalf("expected NSQMaxInFlightCH=50000, got %d", cfg.NSQMaxInFlightCH)
+	}
+	if cfg.CHWriteShards != 2 {
+		t.Fatalf("expected CHWriteShards=2, got %d", cfg.CHWriteShards)
+	}
+	if cfg.CHQueueBufferSize != 100000 {
+		t.Fatalf("expected CHQueueBufferSize=100000, got %d", cfg.CHQueueBufferSize)
+	}
+	if cfg.CHDedupMode != CHDedupModeRedis {
+		t.Fatalf("expected CHDedupMode=%s, got %q", CHDedupModeRedis, cfg.CHDedupMode)
+	}
+	if cfg.CHEnableSidecars {
+		t.Fatalf("expected CHEnableSidecars=false by default")
+	}
+	if cfg.NSQLogChannelCH != "ch-log-consumer" || cfg.NSQEventChannelCH != "ch-event-consumer" {
+		t.Fatalf("unexpected CH channel names: %q/%q", cfg.NSQLogChannelCH, cfg.NSQEventChannelCH)
+	}
+	if cfg.NSQDepthAlertThreshold != 100000 {
+		t.Fatalf("expected NSQDepthAlertThreshold=100000, got %d", cfg.NSQDepthAlertThreshold)
+	}
+	if cfg.CHShortQueryMaxConcurrent != 64 || cfg.CHHeavyQueryMaxConcurrent != 8 {
+		t.Fatalf("unexpected query semaphore defaults: %d/%d", cfg.CHShortQueryMaxConcurrent, cfg.CHHeavyQueryMaxConcurrent)
+	}
+	if cfg.CHLogTTLDays != 30 {
+		t.Fatalf("expected CHLogTTLDays=30, got %d", cfg.CHLogTTLDays)
+	}
+}
+
+func TestFromEnv_StorageBackendValidation(t *testing.T) {
+	base := func() {
+		t.Setenv("RUN_CONSUMERS", "false")
+		t.Setenv("NSQD_ADDRESS", "127.0.0.1:4150")
+		t.Setenv("AUTH_SECRET", base64.RawStdEncoding.EncodeToString(make([]byte, 32)))
+		t.Setenv("QUERY_BACKEND_PERCENT", "")
+		t.Setenv("STORAGE_BACKEND", "")
+		t.Setenv("CLICKHOUSE_DSN", "")
+		t.Setenv("CH_DEDUP_MODE", "")
+	}
+
+	base()
+	t.Setenv("STORAGE_BACKEND", "s3")
+	if _, err := FromEnv(); err == nil {
+		t.Fatalf("expected error for unknown STORAGE_BACKEND")
+	}
+
+	base()
+	t.Setenv("STORAGE_BACKEND", "dual")
+	if _, err := FromEnv(); err == nil {
+		t.Fatalf("expected error when STORAGE_BACKEND=dual without CLICKHOUSE_DSN")
+	}
+
+	base()
+	t.Setenv("STORAGE_BACKEND", "CLICKHOUSE")
+	t.Setenv("CLICKHOUSE_DSN", "clickhouse://u:p@127.0.0.1:9000/logtap")
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatalf("FromEnv: %v", err)
+	}
+	if cfg.StorageBackend != StorageBackendClickHouse {
+		t.Fatalf("expected lowercased StorageBackend, got %q", cfg.StorageBackend)
+	}
+	if cfg.ClickHouseReadDSN != cfg.ClickHouseDSN {
+		t.Fatalf("expected ClickHouseReadDSN to fall back to ClickHouseDSN")
+	}
+
+	base()
+	t.Setenv("CLICKHOUSE_DSN", "clickhouse://u:p@127.0.0.1:9000/logtap")
+	t.Setenv("CLICKHOUSE_READ_DSN", "clickhouse://u:p@replica:9000/logtap")
+	cfg, err = FromEnv()
+	if err != nil {
+		t.Fatalf("FromEnv: %v", err)
+	}
+	if cfg.ClickHouseReadDSN != "clickhouse://u:p@replica:9000/logtap" {
+		t.Fatalf("expected ClickHouseReadDSN override, got %q", cfg.ClickHouseReadDSN)
+	}
+
+	base()
+	t.Setenv("CH_DEDUP_MODE", "bogus")
+	if _, err := FromEnv(); err == nil {
+		t.Fatalf("expected error for unknown CH_DEDUP_MODE")
+	}
+
+	base()
+	t.Setenv("QUERY_BACKEND_PERCENT", "150")
+	if _, err := FromEnv(); err == nil {
+		t.Fatalf("expected error for out-of-range QUERY_BACKEND_PERCENT")
+	}
+}
+
+func TestFromEnv_QueryBackendProjects(t *testing.T) {
+	t.Setenv("RUN_CONSUMERS", "false")
+	t.Setenv("NSQD_ADDRESS", "127.0.0.1:4150")
+	t.Setenv("AUTH_SECRET", base64.RawStdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("QUERY_BACKEND_PROJECTS", " 1, 2;x;0,-3, 3 ")
+
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatalf("FromEnv: %v", err)
+	}
+	if len(cfg.QueryBackendProjects) != 3 || cfg.QueryBackendProjects[0] != 1 || cfg.QueryBackendProjects[2] != 3 {
+		t.Fatalf("expected [1 2 3], got %v", cfg.QueryBackendProjects)
+	}
+}
+
 func TestHelpers_ParseAndRedact(t *testing.T) {
 	if parseBoolDefault("not-bool", true) != true {
 		t.Fatalf("expected parseBoolDefault fallback")
