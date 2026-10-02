@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/aak1247/logtap/internal/config"
@@ -121,6 +122,7 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 	} else {
 		ingestAPI.Use(acceptProxySecretMiddleware(cfg.LogtapProxySecret))
 	}
+	ingestAPI.Use(ingestBackpressureMiddleware())
 	{
 		switch {
 		case authEnabled:
@@ -253,6 +255,27 @@ func newSearchAdapter(cfg config.Config, db *gorm.DB) search.SearchAdapter {
 		log.Printf("search: STORAGE_BACKEND=%s has no ClickHouse search adapter wired yet; falling back to postgres", cfg.StorageBackend)
 	}
 	return searchpostgres.NewAdapter(db)
+}
+
+// ingestBackpressure flips on when the NSQ backlog exceeds the configured
+// threshold (design §5.3 backpressure chain): ingest endpoints then shed
+// load with 503 + Retry-After instead of queueing further.
+var ingestBackpressure atomic.Bool
+
+// SetIngestBackpressure toggles ingest load shedding; cmd/gateway drives it
+// from the NSQ depth poller.
+func SetIngestBackpressure(on bool) { ingestBackpressure.Store(on) }
+
+func ingestBackpressureMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if ingestBackpressure.Load() {
+			c.Header("Retry-After", "5")
+			c.String(http.StatusServiceUnavailable, "ingest backpressure: queue backlog above threshold")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }
 
 func requireAuthReadyMiddleware(db *gorm.DB, authSecret []byte) gin.HandlerFunc {

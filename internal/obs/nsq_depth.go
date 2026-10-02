@@ -33,6 +33,13 @@ type nsqStats struct {
 }
 
 func StartNSQDepthPoller(ctx context.Context, stats *Stats, nsqdHTTPAddr string, interval time.Duration) {
+	StartNSQDepthPollerFunc(ctx, stats, nsqdHTTPAddr, interval, nil)
+}
+
+// StartNSQDepthPollerFunc additionally invokes onDepth with each topic's
+// total backlog (depth + in-flight + deferred); used by the ingest
+// backpressure guard in cmd/gateway.
+func StartNSQDepthPollerFunc(ctx context.Context, stats *Stats, nsqdHTTPAddr string, interval time.Duration, onDepth func(topic string, total int64)) {
 	if stats == nil {
 		return
 	}
@@ -52,18 +59,18 @@ func StartNSQDepthPoller(ctx context.Context, stats *Stats, nsqdHTTPAddr string,
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	_ = pollOnce(ctx, client, url, stats)
+	_ = pollOnce(ctx, client, url, stats, onDepth)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_ = pollOnce(ctx, client, url, stats)
+			_ = pollOnce(ctx, client, url, stats, onDepth)
 		}
 	}
 }
 
-func pollOnce(ctx context.Context, client *http.Client, url string, stats *Stats) error {
+func pollOnce(ctx context.Context, client *http.Client, url string, stats *Stats, onDepth func(topic string, total int64)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -91,9 +98,15 @@ func pollOnce(ctx context.Context, client *http.Client, url string, stats *Stats
 	}
 	if v, ok := depths["logs"]; ok {
 		stats.SetNSQDepth("logs", v)
+		if onDepth != nil {
+			onDepth("logs", v)
+		}
 	}
 	if v, ok := depths["events"]; ok {
 		stats.SetNSQDepth("events", v)
+		if onDepth != nil {
+			onDepth("events", v)
+		}
 	}
 	return nil
 }

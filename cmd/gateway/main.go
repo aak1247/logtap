@@ -33,6 +33,7 @@ import (
 	"github.com/aak1247/logtap/internal/obs"
 	"github.com/aak1247/logtap/internal/queue"
 	"github.com/aak1247/logtap/internal/selflog"
+	"github.com/aak1247/logtap/internal/store/clickhouse"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -62,7 +63,10 @@ func main() {
 		publisher = asyncPub
 	}
 	if cfg.NSQDHTTPAddress != "" {
-		go obs.StartNSQDepthPoller(ctx, stats, cfg.NSQDHTTPAddress, 5*time.Second)
+		threshold := int64(cfg.NSQDepthAlertThreshold)
+		obs.StartNSQDepthPollerFunc(ctx, stats, cfg.NSQDHTTPAddress, 5*time.Second, func(topic string, total int64) {
+			httpserver.SetIngestBackpressure(total > threshold)
+		})
 	}
 
 	var gdb *gorm.DB
@@ -188,7 +192,12 @@ func main() {
 
 	var eventConsumer *consumer.NSQConsumer
 	var logConsumer *consumer.NSQConsumer
-	if cfg.RunConsumers {
+	var chClients *clickhouse.Clients
+	// ClickHouse mode stops the Postgres data-plane consumers; postgres and
+	// dual keep them (dual writes both backends through independent NSQ
+	// channels).
+	runPGDataConsumers := cfg.RunConsumers && cfg.StorageBackend != config.StorageBackendClickHouse
+	if runPGDataConsumers {
 		if gdb == nil {
 			log.Fatalf("POSTGRES_URL required when RUN_CONSUMERS=true")
 		}
@@ -200,6 +209,60 @@ func main() {
 		if err != nil {
 			log.Fatalf("log consumer: %v", err)
 		}
+	}
+
+	var chLogConsumer, chEventConsumer *consumer.CHConsumer
+	if cfg.RunConsumers && cfg.StorageBackend != config.StorageBackendPostgres {
+		if cfg.ClickHouseDSN == "" {
+			log.Fatalf("CLICKHOUSE_DSN required when STORAGE_BACKEND=%s", cfg.StorageBackend)
+		}
+		readyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		clients, err := clickhouse.WaitForClickHouse(readyCtx, cfg.ClickHouseDSN, cfg.ClickHouseReadDSN)
+		cancel()
+		if err != nil {
+			log.Fatalf("clickhouse: %v", err)
+		}
+		chClients = clients
+
+		migCtx, cancel := context.WithTimeout(ctx, cfg.DBMigrationTimeout)
+		if err := clickhouse.Migrate(migCtx, chClients.Write, cfg.CHLogTTLDays); err != nil {
+			cancel()
+			log.Fatalf("clickhouse migrate: %v", err)
+		}
+		cancel()
+
+		var dedupRDB *redis.Client
+		if cfg.CHDedupMode == config.CHDedupModeRedis && cfg.RedisAddr != "" {
+			dedupRDB, err = metrics.NewRedisClient(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
+			if err != nil {
+				log.Printf("clickhouse dedup gate disabled (redis client: %v)", err)
+				dedupRDB = nil
+			} else {
+				pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				if pingErr := dedupRDB.Ping(pingCtx).Err(); pingErr != nil {
+					cancel()
+					log.Printf("clickhouse dedup gate disabled (redis ping: %v)", pingErr)
+					_ = dedupRDB.Close()
+					dedupRDB = nil
+				} else {
+					cancel()
+					defer dedupRDB.Close()
+				}
+			}
+		} else {
+			log.Printf("clickhouse dedup gate disabled (CH_DEDUP_MODE=%s REDIS_ADDR=%q)", cfg.CHDedupMode, cfg.RedisAddr)
+		}
+
+		chLogConsumer, err = consumer.NewCHLogConsumer(ctx, cfg, chClients, gdb, dedupRDB, recorder, geoip, stats)
+		if err != nil {
+			log.Fatalf("clickhouse log consumer: %v", err)
+		}
+		chEventConsumer, err = consumer.NewCHEventConsumer(ctx, cfg, chClients, gdb, dedupRDB, recorder, geoip, stats)
+		if err != nil {
+			log.Fatalf("clickhouse event consumer: %v", err)
+		}
+		log.Printf("clickhouse consumers enabled (backend=%s channels(logs=%s events=%s) batch=%d/%s shards=%d max_in_flight=%d)",
+			cfg.StorageBackend, cfg.NSQLogChannelCH, cfg.NSQEventChannelCH, cfg.CHLogBatchSize, cfg.CHLogFlushInterval, cfg.CHWriteShards, cfg.NSQMaxInFlightCH)
 	}
 
 	if gdb != nil {
@@ -244,7 +307,7 @@ func main() {
 	log.Printf("http listening on %s", cfg.HTTPAddr)
 
 	if cfg.RunConsumers {
-		log.Printf("consumers enabled (events/logs)")
+		log.Printf("consumers enabled (backend=%s events/logs)", cfg.StorageBackend)
 	}
 
 	select {
@@ -262,9 +325,20 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("http shutdown: %v", err)
 	}
-	if cfg.RunConsumers {
+	if runPGDataConsumers {
 		eventConsumer.Stop()
 		logConsumer.Stop()
+	}
+	// CH consumers drain their batchers on Stop: flush what fits inside
+	// CH_DRAIN_TIMEOUT, Requeue(0) the rest (design §5.2.2).
+	if chLogConsumer != nil {
+		chLogConsumer.Stop()
+	}
+	if chEventConsumer != nil {
+		chEventConsumer.Stop()
+	}
+	if chClients != nil {
+		chClients.Close()
 	}
 }
 
