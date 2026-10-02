@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -65,8 +66,23 @@ func main() {
 	}
 	if cfg.NSQDHTTPAddress != "" {
 		threshold := int64(cfg.NSQDepthAlertThreshold)
+		// Track per-topic backlog: the poller reports logs and events in the
+		// same tick, and backpressure must stay on while ANY topic is over
+		// the threshold (not just the one seen last).
+		var depthsMu sync.Mutex
+		depths := map[string]int64{}
 		obs.StartNSQDepthPollerFunc(ctx, stats, cfg.NSQDHTTPAddress, 5*time.Second, func(topic string, total int64) {
-			httpserver.SetIngestBackpressure(total > threshold)
+			depthsMu.Lock()
+			depths[topic] = total
+			over := false
+			for _, v := range depths {
+				if v > threshold {
+					over = true
+					break
+				}
+			}
+			depthsMu.Unlock()
+			httpserver.SetIngestBackpressure(over)
 		})
 	}
 

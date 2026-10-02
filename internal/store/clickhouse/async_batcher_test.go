@@ -275,3 +275,25 @@ func TestBatcher_EnqueueAfterStopReturnsErr(t *testing.T) {
 		t.Fatalf("expected ErrStopped, got %v", err)
 	}
 }
+
+func TestBatcher_StopReturnsPromptlyAfterCleanDrain(t *testing.T) {
+	rec := &flushRecorder{}
+	b := newTestBatcher(t, 1000, rec.record, nil) // partial batch, flushed by ticker
+	items := makeItems(3)
+	for i := range items {
+		if err := b.Enqueue(items[i]); err != nil {
+			t.Fatalf("Enqueue: %v", err)
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		b.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("Stop blocked: the drain watchdog must not wait out the full DrainTimeout on a clean drain")
+	}
+	waitFor(t, 2*time.Second, func() bool { return rec.flushedRows() == 3 }, "drain flush")
+}

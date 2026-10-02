@@ -129,6 +129,9 @@ type Batcher[T any] struct {
 	draining bool // Stop began: no more Enqueue
 	aggDone  bool // aggregator exited: no more batches will be cut
 	abort    bool // drain watchdog fired: drop queued batches via Requeue(0)
+
+	drainIdle chan struct{} // closed once draining finished with nothing pending
+	drainOnce sync.Once
 }
 
 // NewBatcher starts the aggregator, Shards flushers, the toucher and the
@@ -138,12 +141,13 @@ type Batcher[T any] struct {
 func NewBatcher[T any](opts BatcherOptions, flush func(ctx context.Context, items []Item[T]) error, after func(items []Item[T])) *Batcher[T] {
 	opts = opts.withDefaults()
 	b := &Batcher[T]{
-		opts:     opts,
-		flush:    flush,
-		after:    after,
-		incoming: make(chan Item[T], opts.QueueSize),
-		stopCh:   make(chan struct{}),
-		flushing: make(map[int][]Item[T]),
+		opts:      opts,
+		flush:     flush,
+		after:     after,
+		incoming:  make(chan Item[T], opts.QueueSize),
+		stopCh:    make(chan struct{}),
+		flushing:  make(map[int][]Item[T]),
+		drainIdle: make(chan struct{}),
 	}
 	b.cond = sync.NewCond(&b.mu)
 	b.wg.Add(1 + opts.Shards + 2)
@@ -215,6 +219,7 @@ func (b *Batcher[T]) aggregateLoop() {
 					b.cutBatch()
 					b.mu.Lock()
 					b.aggDone = true
+					b.markDrainIdleLocked()
 					b.mu.Unlock()
 					b.cond.Broadcast()
 					return
@@ -277,6 +282,7 @@ func (b *Batcher[T]) flushLoop() {
 		b.mu.Lock()
 		delete(b.flushing, id)
 		aborted := b.abort || (b.aggDone && len(b.inflight) == 0)
+		b.markDrainIdleLocked()
 		b.mu.Unlock()
 
 		chMetrics.Add("flush_total", 1)
@@ -306,6 +312,19 @@ func (b *Batcher[T]) flushLoop() {
 	}
 }
 
+// markDrainIdleLocked closes the drainIdle signal once draining started and
+// nothing is pending anymore. The caller must hold b.mu. The drain watchdog
+// listens on it so a clean early drain does not have to wait out the whole
+// DrainTimeout before Stop() can return.
+func (b *Batcher[T]) markDrainIdleLocked() {
+	if !b.draining || !b.aggDone || b.abort {
+		return
+	}
+	if len(b.active) == 0 && len(b.inflight) == 0 && len(b.flushing) == 0 {
+		b.drainOnce.Do(func() { close(b.drainIdle) })
+	}
+}
+
 // touchLoop renews the NSQ lease of items that queue longer than TouchAfter
 // so that slow flushes never trigger MsgTimeout redelivery (design §5.2.2).
 func (b *Batcher[T]) touchLoop() {
@@ -317,37 +336,52 @@ func (b *Batcher[T]) touchLoop() {
 		case <-ticker.C:
 			deadline := time.Now().Add(-b.opts.TouchAfter)
 			b.mu.Lock()
-			queued := len(b.active) + len(b.inflight) + len(b.flushing)
+			queued := len(b.active)
+			for _, batch := range b.inflight {
+				queued += len(batch)
+			}
+			for _, batch := range b.flushing {
+				queued += len(batch)
+			}
+			// Collect the lease renewals first and run them after releasing
+			// the lock: Touch() performs network I/O on the NSQ connection
+			// and must never extend the batcher's critical sections.
+			var ctls []MessageCtl
 			for i := range b.active {
 				if b.active[i].EnqueuedAt.Before(deadline) {
-					b.active[i].Ctl.Touch()
+					ctls = append(ctls, b.active[i].Ctl)
 				}
 			}
 			for _, batch := range b.inflight {
-				touchBatch(batch, deadline)
+				for i := range batch {
+					if batch[i].EnqueuedAt.Before(deadline) {
+						ctls = append(ctls, batch[i].Ctl)
+					}
+				}
 			}
 			for _, batch := range b.flushing {
-				touchBatch(batch, deadline)
+				for i := range batch {
+					if batch[i].EnqueuedAt.Before(deadline) {
+						ctls = append(ctls, batch[i].Ctl)
+					}
+				}
 			}
 			chMetrics.Set("queued_items", func() expvar.Var { i := new(expvar.Int); i.Set(int64(queued)); return i }())
 			b.mu.Unlock()
+			for _, ctl := range ctls {
+				ctl.Touch()
+			}
 		case <-b.stopCh:
 			return
 		}
 	}
 }
 
-func touchBatch[T any](batch []Item[T], deadline time.Time) {
-	for i := range batch {
-		if batch[i].EnqueuedAt.Before(deadline) {
-			batch[i].Ctl.Touch()
-		}
-	}
-}
-
 // drainWatchdog bounds Stop(): once Stop began it gives the flushers
 // DrainTimeout to catch up; whatever is still queued then is Requeue(0)ed
-// back to NSQ so nothing stays parked in memory.
+// back to NSQ so nothing stays parked in memory. A clean early drain closes
+// drainIdle and the watchdog returns immediately instead of waiting out the
+// whole timeout.
 func (b *Batcher[T]) drainWatchdog() {
 	defer b.wg.Done()
 	select {
@@ -355,7 +389,11 @@ func (b *Batcher[T]) drainWatchdog() {
 	}
 	timer := time.NewTimer(b.opts.DrainTimeout)
 	defer timer.Stop()
-	<-timer.C
+	select {
+	case <-b.drainIdle:
+		return
+	case <-timer.C:
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if !b.draining {
