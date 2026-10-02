@@ -64,6 +64,30 @@ docker compose up --build
 
 See `.env.example` for a complete example.
 
+### ClickHouse storage backend (experimental)
+
+logtap can run its log/event storage on ClickHouse for much higher ingest
+throughput (100k+ EPS per node) and millisecond-level analytical queries.
+The design, schema and the staged postgres → dual → clickhouse migration are
+described in [`docs/CLICKHOUSE_STORAGE_DESIGN.md`](docs/CLICKHOUSE_STORAGE_DESIGN.md).
+Postgres remains required for metadata (users/projects/keys/alerts) in every
+mode.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `STORAGE_BACKEND` | Storage selection: `postgres` (default behavior), `dual` (NSQ fan-out writes to PG + ClickHouse via independent channels), `clickhouse` (PG data-plane consumers off; PG keeps metadata only). | `postgres` |
+| `CLICKHOUSE_DSN` | ClickHouse native-protocol DSN, e.g. `clickhouse://user:pass@host:9000/logtap`. Required for `dual`/`clickhouse`. | - |
+| `CLICKHOUSE_READ_DSN` | Read replica DSN for query traffic (falls back to `CLICKHOUSE_DSN`). | - |
+| `CH_LOG_BATCH_SIZE` / `CH_LOG_FLUSH_INTERVAL` | Log batch target and max flush delay. | `5000` / `500ms` |
+| `NSQ_MAX_IN_FLIGHT_CH` | In-flight budget for the ClickHouse consumers. | `50000` |
+| `CH_DRAIN_TIMEOUT` | Graceful-shutdown drain window before leftovers are requeued. | `20s` |
+| `CH_LOG_TTL_DAYS` | Raw-data retention (whole-part TTL drops). | `30` |
+| `QUERY_BACKEND_PROJECTS` / `QUERY_BACKEND_PERCENT` | Gray-release read routing to ClickHouse in `dual` mode. | - |
+
+Local evaluation: `docker compose --profile clickhouse up -d` starts a
+single-node ClickHouse 26.3 LTS alongside the stack (development only —
+production requires the replicated baseline described in the design doc).
+
 ### Required
 
 | Variable | Description | Default |

@@ -1,0 +1,98 @@
+# ClickHouse storage backend — stage A topology (design doc
+# docs/CLICKHOUSE_STORAGE_DESIGN.md §8.1.1): single node for local
+# development, testing and self-hosted evaluation.
+#
+# PRODUCTION NOTE (design §8.1.2): commercial multi-tenant deployments must
+# run the stage-B baseline — 1 shard x 2 replicas (multi-AZ) + 3 Keeper
+# nodes via the Altinity clickhouse-operator, with read/write Services
+# split (clickhouse-write / clickhouse-read). Stage A carries RPO up to 24h
+# (daily clickhouse-backup to S3) and hour-level RTO; do not host SLA
+# traffic on it.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: clickhouse
+  labels:
+    app: clickhouse
+spec:
+  serviceName: clickhouse
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clickhouse
+  template:
+    metadata:
+      labels:
+        app: clickhouse
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:26.3
+          ports:
+            - name: http
+              containerPort: 8123
+            - name: native
+              containerPort: 9000
+          env:
+            - name: CLICKHOUSE_USER
+              value: "logtap"
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-auth
+                  key: password
+            - name: CLICKHOUSE_DB
+              value: "logtap"
+          resources:
+            requests:
+              cpu: "4"
+              memory: 16Gi
+            limits:
+              cpu: "8"
+              memory: 32Gi
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 500Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse
+  labels:
+    app: clickhouse
+spec:
+  selector:
+    app: clickhouse
+  ports:
+    - name: http
+      port: 8123
+      targetPort: http
+    - name: native
+      port: 9000
+      targetPort: native
+---
+# Example secret (create it out-of-band, never commit real values):
+#
+#   kubectl create secret generic clickhouse-auth \
+#     --from-literal=password='<strong-password>'

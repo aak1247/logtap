@@ -66,7 +66,40 @@ services:
       - "8080:8080"
     volumes:
       - geoip:/data/geoip
+    # ClickHouse storage backend (opt-in, see docs/CLICKHOUSE_STORAGE_DESIGN.md).
+    # Start it with: docker compose --profile clickhouse up -d
+    # Then uncomment to switch the gateway to dual writing (reads stay on PG
+    # until the read cutover):
+    #   STORAGE_BACKEND: "dual"
+    #   CLICKHOUSE_DSN: "clickhouse://logtap:clickhouse@clickhouse:9000/logtap?dial_timeout=5s"
+    #   # CH_DEDUP_MODE: "redis"        # default; requires REDIS_ADDR
+    #   # CH_ENABLE_SIDECARS: "false"   # true only when PG data consumers are off
+
+  # ClickHouse 26.3 LTS single node for development and evaluation only.
+  # Production must run the stage-B baseline (1 shard x 2 replicas + Keeper).
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.3
+    profiles: ["clickhouse"]
+    environment:
+      CLICKHOUSE_USER: "logtap"
+      CLICKHOUSE_PASSWORD: "clickhouse"
+      CLICKHOUSE_DB: "logtap"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - chdata:/var/lib/clickhouse
 
 volumes:
   pgdata: {}
   geoip: {}
+  chdata: {}
