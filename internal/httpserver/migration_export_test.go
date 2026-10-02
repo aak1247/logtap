@@ -60,7 +60,7 @@ func TestMigrationExportCloud_AllowsNoAuthLocalServer(t *testing.T) {
 		HTTPAddr:          "127.0.0.1:0",
 		MigrationCloudURL: cloud.URL,
 	}
-	srv := httpserver.New(cfg, publisher, db, nil, nil, nil, nil)
+	srv := httpserver.New(cfg, publisher, db, nil, nil, nil, nil, nil)
 	local := httptest.NewServer(srv.Handler)
 	t.Cleanup(local.Close)
 

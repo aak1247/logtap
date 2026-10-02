@@ -46,7 +46,7 @@ func main() {
 	}
 	detectorService := detector.NewService(reg, nil)
 
-	srv := httpserver.New(cfg, publisher, db, nil, nil, detectorService, nil)
+	srv := httpserver.New(cfg, publisher, db, nil, nil, detectorService, nil, nil)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

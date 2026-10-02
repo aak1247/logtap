@@ -91,6 +91,10 @@ type Config struct {
 	CHDedupMode          string // redis | none
 	CHEnableSidecars     bool   // drive Redis recorder + alert evaluator from the CH consumer
 	CHLogTTLDays         int
+	// CHTextTokenizer selects the full-text tokenizer for the message text
+	// index. The 26.3 stock build ships splitByNonAlpha/splitByString only;
+	// builds with CJK tokenizers (e.g. jieba) can opt in via env.
+	CHTextTokenizer string
 
 	NSQMaxInFlightCH  int
 	NSQLogChannelCH   string
@@ -240,6 +244,7 @@ Optional: set AUTH_SECRET_FILE=/path/to/secret (file contains the base64 secret)
 		CHDedupMode:                  strings.ToLower(getenvDefault("CH_DEDUP_MODE", CHDedupModeRedis)),
 		CHEnableSidecars:             parseBoolDefault(getenvDefault("CH_ENABLE_SIDECARS", "false"), false),
 		CHLogTTLDays:                 parseIntDefault(getenvDefault("CH_LOG_TTL_DAYS", "30"), 30),
+		CHTextTokenizer:              strings.ToLower(getenvDefault("CH_TEXT_TOKENIZER", "splitbynonalpha")),
 		NSQMaxInFlightCH:             parseIntDefault(getenvDefault("NSQ_MAX_IN_FLIGHT_CH", "50000"), 50000),
 		NSQLogChannelCH:              getenvDefault("NSQ_LOG_CHANNEL_CH", "ch-log-consumer"),
 		NSQEventChannelCH:            getenvDefault("NSQ_EVENT_CHANNEL_CH", "ch-event-consumer"),

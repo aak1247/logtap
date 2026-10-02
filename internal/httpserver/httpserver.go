@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/aak1247/logtap/internal/config"
 	"github.com/aak1247/logtap/internal/detector"
 	"github.com/aak1247/logtap/internal/ingest"
@@ -18,13 +19,16 @@ import (
 	"github.com/aak1247/logtap/internal/query"
 	"github.com/aak1247/logtap/internal/queue"
 	"github.com/aak1247/logtap/internal/search"
+	searchclickhouse "github.com/aak1247/logtap/internal/search/adapters/clickhouse"
 	searchpostgres "github.com/aak1247/logtap/internal/search/adapters/postgres"
 	"github.com/gin-gonic/gin"
 	swgui "github.com/swaggest/swgui/v3"
 	"gorm.io/gorm"
 )
 
-func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *metrics.RedisRecorder, stats *obs.Stats, detectorService *detector.Service, detectorStore *detector.ResultStore) *http.Server {
+// New builds the HTTP server. chRead, when non-nil, is the ClickHouse read
+// connection used by the query backend router and the unified-search adapter.
+func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *metrics.RedisRecorder, stats *obs.Stats, detectorService *detector.Service, detectorStore *detector.ResultStore, chRead chdriver.Conn) *http.Server {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
@@ -148,29 +152,30 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 		queryAPI.Use(RequireUserOrProxy(cfg.AuthSecret), RequireProjectOwner(db))
 	}
 	{
+		router := query.NewQueryRouter(cfg, chRead)
 		if db != nil {
-			queryAPI.GET("/events/recent", query.RecentEventsHandler(db))
-			queryAPI.GET("/events/:eventId", query.GetEventHandler(db))
+			queryAPI.GET("/events/recent", router.Route(query.RecentEventsHandler(db), router.CHRecentEventsHandler()))
+			queryAPI.GET("/events/:eventId", router.Route(query.GetEventHandler(db), router.CHGetEventHandler()))
 			queryAPI.GET("/events/schema", query.ListEventDefinitionsHandler(db))
 			queryAPI.POST("/events/schema", query.CreateEventDefinitionHandler(db))
 			queryAPI.PUT("/events/schema/:eventName", query.UpdateEventDefinitionHandler(db))
-			queryAPI.GET("/logs/search", query.SearchLogsHandler(db))
-			queryAPI.GET("/logs/trend", query.LogTrendHandler(db))
-			// Unified search endpoint (v1: queries logs table via adapter)
+			queryAPI.GET("/logs/search", router.Route(query.SearchLogsHandler(db), router.CHSearchLogsHandler()))
+			queryAPI.GET("/logs/trend", router.Route(query.LogTrendHandler(db), router.CHLogTrendHandler()))
+			// Unified search endpoint (adapter chosen by STORAGE_BACKEND)
 			if db != nil {
-				searchEngine := search.NewEngine(newSearchAdapter(cfg, db))
+				searchEngine := search.NewEngine(newSearchAdapter(cfg, db, chRead))
 				queryAPI.GET("/search", search.SearchHandler(searchEngine))
 			}
 			queryAPI.DELETE("/logs/cleanup", query.CleanupLogsHandler(db))
 			queryAPI.DELETE("/events/cleanup", query.CleanupEventsHandler(db))
-			queryAPI.GET("/storage/estimate", query.StorageEstimateHandler(db))
+			queryAPI.GET("/storage/estimate", router.Route(query.StorageEstimateHandler(db), router.CHStorageEstimateHandler()))
 			queryAPI.GET("/cleanup/policy", query.GetCleanupPolicyHandler(db))
 			queryAPI.PUT("/cleanup/policy", query.UpsertCleanupPolicyHandler(db))
 			queryAPI.POST("/cleanup/run", query.RunCleanupPolicyHandler(db))
-			queryAPI.GET("/analytics/events/top", query.TopEventsHandler(db))
+			queryAPI.GET("/analytics/events/top", router.Route(query.TopEventsHandler(db), router.CHTopEventsHandler()))
 			queryAPI.GET("/analytics/users", query.UserGrowthHandler(db))
-			queryAPI.GET("/analytics/funnel", query.FunnelHandler(db))
-			queryAPI.POST("/analytics/custom", query.CustomAnalyticsHandler(db))
+			queryAPI.GET("/analytics/funnel", router.Route(query.FunnelHandler(db), router.CHFunnelHandler()))
+			queryAPI.POST("/analytics/custom", router.Route(query.CustomAnalyticsHandler(db), router.CHCustomAnalyticsHandler()))
 			queryAPI.GET("/analytics/views", query.ListAnalysisViewsHandler(db))
 			queryAPI.POST("/analytics/views", query.CreateAnalysisViewHandler(db))
 			queryAPI.GET("/analytics/views/:viewId", query.GetAnalysisViewHandler(db))
@@ -225,8 +230,8 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 			queryAPI.GET("/plugins/packages/:packageId/analysis", query.PluginPackageAnalysisHandler(db, detectorStore))
 			queryAPI.GET("/plugins/detectors/:detectorType/analysis", query.DetectorAnalysisHandler(db, detectorStore))
 		}
-		queryAPI.GET("/metrics/today", query.MetricsTodayHandler(recorder, db))
-		queryAPI.GET("/metrics/total", query.MetricsTotalHandler(recorder, db))
+		queryAPI.GET("/metrics/today", router.Route(query.MetricsTodayHandler(recorder, db), router.CHMetricsTodayHandler()))
+		queryAPI.GET("/metrics/total", router.Route(query.MetricsTotalHandler(recorder, db), router.CHMetricsTotalHandler()))
 		queryAPI.GET("/analytics/active", query.ActiveSeriesHandler(recorder, db))
 		queryAPI.GET("/analytics/dist", query.DistributionHandler(recorder))
 		queryAPI.GET("/analytics/dist/series", query.DistributionSeriesHandler(recorder))
@@ -247,12 +252,15 @@ func New(cfg config.Config, publisher queue.Publisher, db *gorm.DB, recorder *me
 }
 
 // newSearchAdapter selects the unified-search backend by STORAGE_BACKEND.
-// Only the Postgres adapter exists today; the ClickHouse adapter is wired in
-// by the storage-backend work, so non-postgres backends fall back to
-// Postgres (which stays authoritative until the read cutover) with a warning.
-func newSearchAdapter(cfg config.Config, db *gorm.DB) search.SearchAdapter {
+// The ClickHouse adapter requires the CH read connection; without it
+// non-postgres backends fall back to Postgres (authoritative until the read
+// cutover) with a warning.
+func newSearchAdapter(cfg config.Config, db *gorm.DB, chRead chdriver.Conn) search.SearchAdapter {
+	if chRead != nil && cfg.StorageBackend != config.StorageBackendPostgres {
+		return searchclickhouse.NewAdapter(chRead)
+	}
 	if cfg.StorageBackend != config.StorageBackendPostgres {
-		log.Printf("search: STORAGE_BACKEND=%s has no ClickHouse search adapter wired yet; falling back to postgres", cfg.StorageBackend)
+		log.Printf("search: STORAGE_BACKEND=%s has no ClickHouse connection; falling back to postgres", cfg.StorageBackend)
 	}
 	return searchpostgres.NewAdapter(db)
 }

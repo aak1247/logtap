@@ -74,12 +74,12 @@ func CreatePropertyDefinitionHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var req struct {
-			Key          string   `json:"key"`
-			DisplayName  string   `json:"display_name"`
-			Type         string   `json:"type"`
-			Description  string   `json:"description"`
-			Status       string   `json:"status"`
-			EnumValues   []string `json:"enum_values"`
+			Key           string   `json:"key"`
+			DisplayName   string   `json:"display_name"`
+			Type          string   `json:"type"`
+			Description   string   `json:"description"`
+			Status        string   `json:"status"`
+			EnumValues    []string `json:"enum_values"`
 			ExampleValues []string `json:"example_values"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -154,13 +154,13 @@ func CreatePropertyDefinitionHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		row := model.PropertyDefinition{
-			ProjectID:    projectID,
-			Key:          key,
-			DisplayName:  displayName,
-			Type:         pt,
-			Description:  req.Description,
-			Status:       status,
-			EnumValues:   enumJSON,
+			ProjectID:     projectID,
+			Key:           key,
+			DisplayName:   displayName,
+			Type:          pt,
+			Description:   req.Description,
+			Status:        status,
+			EnumValues:    enumJSON,
 			ExampleValues: exampleJSON,
 		}
 		if err := db.WithContext(ctx).Create(&row).Error; err != nil {
@@ -191,11 +191,11 @@ func UpdatePropertyDefinitionHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var req struct {
-			DisplayName  string   `json:"display_name"`
-			Type         string   `json:"type"`
-			Description  string   `json:"description"`
-			Status       string   `json:"status"`
-			EnumValues   []string `json:"enum_values"`
+			DisplayName   string   `json:"display_name"`
+			Type          string   `json:"type"`
+			Description   string   `json:"description"`
+			Status        string   `json:"status"`
+			EnumValues    []string `json:"enum_values"`
 			ExampleValues []string `json:"example_values"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -287,4 +287,3 @@ func UpdatePropertyDefinitionHandler(db *gorm.DB) gin.HandlerFunc {
 		respondOK(c, row)
 	}
 }
-

@@ -7,6 +7,7 @@ package clickhouse
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -46,7 +47,49 @@ func openConn(dsn string) (driver.Conn, error) {
 	if opts.DialTimeout == 0 {
 		opts.DialTimeout = 5 * time.Second
 	}
-	return clickhouse.Open(opts)
+	conn, err := clickhouse.Open(opts)
+	if err != nil && isUnknownDatabaseErr(err) && opts.Auth.Database != "" {
+		// First boot: the logtap database does not exist yet. Create it via
+		// a server-default connection, then retry.
+		if createErr := createDatabase(opts); createErr != nil {
+			return nil, fmt.Errorf("create database %s: %w (open error: %v)", opts.Auth.Database, createErr, err)
+		}
+		conn, err = clickhouse.Open(opts)
+	}
+	return conn, err
+}
+
+func isUnknownDatabaseErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database") && strings.Contains(msg, "does not exist")
+}
+
+func createDatabase(opts *clickhouse.Options) error {
+	bootstrap := *opts
+	bootstrap.Auth.Database = ""
+	conn, err := clickhouse.Open(&bootstrap)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = conn.Exec(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", backtickIdent(opts.Auth.Database)))
+	return err
+}
+
+// backtickIdent quotes a database identifier; only plain identifiers are
+// accepted (defense in depth — the name comes from our own DSN).
+func backtickIdent(name string) string {
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+			return "`" + strings.ReplaceAll(name, "`", "") + "`"
+		}
+	}
+	return name
 }
 
 // Ping checks both connections.

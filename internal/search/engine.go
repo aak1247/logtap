@@ -26,8 +26,9 @@ func NewEngineWithParser(adapter SearchAdapter, parser QueryParser) *SearchEngin
 }
 
 // Search is the unified search entry point. It parses rawQuery, builds a
-// SearchQuery, and delegates to the adapter.
-func (e *SearchEngine) Search(ctx context.Context, rawQuery string, projectID int, timeRange TimeRange, page, pageSize int) (*SearchResult, error) {
+// SearchQuery, and delegates to the adapter. cursor, when non-empty,
+// switches to keyset pagination on backends that support it.
+func (e *SearchEngine) Search(ctx context.Context, rawQuery string, projectID int, timeRange TimeRange, page, pageSize int, cursor string) (*SearchResult, error) {
 	parsed, err := e.parser.Parse(rawQuery)
 	if err != nil {
 		return nil, err
@@ -55,6 +56,7 @@ func (e *SearchEngine) Search(ctx context.Context, rawQuery string, projectID in
 		Pagination: Pagination{
 			Offset: (page - 1) * pageSize,
 			Limit:  pageSize,
+			Cursor: cursor,
 		},
 		RawQuery: rawQuery,
 	}

@@ -26,7 +26,7 @@ func TestDebugMetricsEndpoint(t *testing.T) {
 		EnableDebugEndpoints: true,
 	}
 
-	srv := New(cfg, nil, nil, nil, stats, nil, nil)
+	srv := New(cfg, nil, nil, nil, stats, nil, nil, nil)
 	ts := httptest.NewServer(srv.Handler)
 	t.Cleanup(ts.Close)
 

@@ -40,7 +40,7 @@ func NewServer(t testing.TB) *Server {
 	_ = reg.RegisterStatic(logbasic.New())
 	detectorService := detector.NewService(reg, nil)
 
-	srv := httpserver.New(cfg, publisher, db, nil, nil, detectorService, nil)
+	srv := httpserver.New(cfg, publisher, db, nil, nil, detectorService, nil, nil)
 	ts := httptest.NewServer(srv.Handler)
 	t.Cleanup(ts.Close)
 

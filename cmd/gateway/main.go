@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/aak1247/logtap/internal/alert"
 	"github.com/aak1247/logtap/internal/channel"
 	"github.com/aak1247/logtap/internal/channel/builtin"
@@ -188,11 +189,38 @@ func main() {
 	log.Printf("detector registry initialized: total=%d dynamic_loaded=%d dynamic_failed=%d", len(detectorRegistry.List()), dynamicLoaded, dynamicFailed)
 	detectorService := detector.NewService(detectorRegistry, detectorStore)
 
-	srv := httpserver.New(cfg, publisher, gdb, recorder, stats, detectorService, detectorStore)
+	var chClients *clickhouse.Clients
+	// ClickHouse backend: connect (write + read) and run idempotent
+	// migrations before the HTTP server starts, so query routing and the
+	// consumers share one client pair (design §3.1/§3.2).
+	if cfg.StorageBackend != config.StorageBackendPostgres && cfg.ClickHouseDSN != "" {
+		readyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		clients, err := clickhouse.WaitForClickHouse(readyCtx, cfg.ClickHouseDSN, cfg.ClickHouseReadDSN)
+		cancel()
+		if err != nil {
+			log.Fatalf("clickhouse: %v", err)
+		}
+		chClients = clients
+		defer chClients.Close()
+		migCtx, cancel := context.WithTimeout(ctx, cfg.DBMigrationTimeout)
+		if err := clickhouse.Migrate(migCtx, chClients.Write, clickhouse.MigrateOptions{
+			LogTTLDays:    cfg.CHLogTTLDays,
+			TextTokenizer: cfg.CHTextTokenizer,
+		}); err != nil {
+			cancel()
+			log.Fatalf("clickhouse migrate: %v", err)
+		}
+		cancel()
+	}
+	var chRead chdriver.Conn
+	if chClients != nil {
+		chRead = chClients.Read
+	}
+
+	srv := httpserver.New(cfg, publisher, gdb, recorder, stats, detectorService, detectorStore, chRead)
 
 	var eventConsumer *consumer.NSQConsumer
 	var logConsumer *consumer.NSQConsumer
-	var chClients *clickhouse.Clients
 	// ClickHouse mode stops the Postgres data-plane consumers; postgres and
 	// dual keep them (dual writes both backends through independent NSQ
 	// channels).
@@ -213,23 +241,9 @@ func main() {
 
 	var chLogConsumer, chEventConsumer *consumer.CHConsumer
 	if cfg.RunConsumers && cfg.StorageBackend != config.StorageBackendPostgres {
-		if cfg.ClickHouseDSN == "" {
+		if chClients == nil {
 			log.Fatalf("CLICKHOUSE_DSN required when STORAGE_BACKEND=%s", cfg.StorageBackend)
 		}
-		readyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		clients, err := clickhouse.WaitForClickHouse(readyCtx, cfg.ClickHouseDSN, cfg.ClickHouseReadDSN)
-		cancel()
-		if err != nil {
-			log.Fatalf("clickhouse: %v", err)
-		}
-		chClients = clients
-
-		migCtx, cancel := context.WithTimeout(ctx, cfg.DBMigrationTimeout)
-		if err := clickhouse.Migrate(migCtx, chClients.Write, cfg.CHLogTTLDays); err != nil {
-			cancel()
-			log.Fatalf("clickhouse migrate: %v", err)
-		}
-		cancel()
 
 		var dedupRDB *redis.Client
 		if cfg.CHDedupMode == config.CHDedupModeRedis && cfg.RedisAddr != "" {

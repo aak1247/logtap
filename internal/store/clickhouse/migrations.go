@@ -16,13 +16,27 @@ type ddlStatement struct {
 	optional bool
 }
 
-// Migrate applies the ClickHouse schema (design §4) idempotently. logTTLDays
-// controls the raw data retention (open-source single-table mode; enterprise
-// tier tables are not created here). The open-source edition creates the
-// plain MergeTree layout with a fixed DefaultTenantID column and no
-// per-tenant quota objects.
-func Migrate(ctx context.Context, conn driver.Conn, logTTLDays int) error {
-	for i, stmt := range ddlStatements(logTTLDays) {
+// MigrateOptions parameterizes the schema (design §4/§8.2).
+type MigrateOptions struct {
+	// LogTTLDays is the raw-data retention for logs/events/track_events.
+	LogTTLDays int
+	// TextTokenizer selects the message full-text index tokenizer
+	// (default splitByNonAlpha; CJK tokenizers when the build ships one).
+	TextTokenizer string
+}
+
+// Migrate applies the ClickHouse schema (design §4) idempotently. The
+// open-source edition creates the plain MergeTree layout with a fixed
+// DefaultTenantID column and no per-tenant quota objects or retention tier
+// tables (those belong to the enterprise edition).
+func Migrate(ctx context.Context, conn driver.Conn, opts MigrateOptions) error {
+	if opts.LogTTLDays <= 0 {
+		opts.LogTTLDays = 30
+	}
+	if opts.TextTokenizer == "" {
+		opts.TextTokenizer = "splitByNonAlpha"
+	}
+	for i, stmt := range ddlStatements(opts) {
 		if err := conn.Exec(ctx, stmt.sql); err != nil {
 			if stmt.optional {
 				log.Printf("clickhouse migrate: optional statement %d skipped: %v", i, err)
@@ -34,9 +48,14 @@ func Migrate(ctx context.Context, conn driver.Conn, logTTLDays int) error {
 	return nil
 }
 
-func ddlStatements(logTTLDays int) []ddlStatement {
+func ddlStatements(opts MigrateOptions) []ddlStatement {
+	logTTLDays := opts.LogTTLDays
+	tokenizer := opts.TextTokenizer
 	const defaultTenant = "00000000-0000-0000-0000-000000000001"
 	stmts := []ddlStatement{
+		{
+			sql: "CREATE DATABASE IF NOT EXISTS logtap",
+		},
 		{
 			sql: fmt.Sprintf(`CREATE TABLE IF NOT EXISTS logtap.logs (
 	tenant_id UUID DEFAULT '%s',
@@ -57,9 +76,12 @@ TTL timestamp + INTERVAL %d DAY
 SETTINGS ttl_only_drop_parts = 1, index_granularity = 8192, non_replicated_deduplication_window = 1000`, defaultTenant, logTTLDays),
 		},
 		{
-			// Full-text index over message (jieba tokenizer, ClickHouse
-			// 26.2+). Optional: older servers fall back to column scan.
-			sql:      fmt.Sprintf("ALTER TABLE logtap.logs ADD INDEX IF NOT EXISTS idx_message_text message TYPE text(tokenizer = 'jieba') GRANULARITY 1"),
+			// Full-text index over message. Tokenizer is configurable: the
+			// stock 26.3 build ships splitByNonAlpha/splitByString only —
+			// CJK-aware tokenizers (jieba) require a build that ships them
+			// (set CH_TEXT_TOKENIZER). Chinese word search falls back to the
+			// contains mode (positionCaseInsensitive) either way.
+			sql:      fmt.Sprintf("ALTER TABLE logtap.logs ADD INDEX IF NOT EXISTS idx_message_text message TYPE text(tokenizer = '%s') GRANULARITY 1", tokenizer),
 			optional: true,
 		},
 		{

@@ -35,6 +35,10 @@ type SortSpec struct {
 type Pagination struct {
 	Offset int
 	Limit  int
+	// Cursor enables keyset pagination ((timestamp, ingest_id) marker,
+	// base64-encoded); it takes precedence over Offset on backends that
+	// support it (ClickHouse).
+	Cursor string `json:"cursor,omitempty"`
 }
 
 type SearchResult struct {
