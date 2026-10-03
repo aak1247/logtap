@@ -71,7 +71,9 @@ func main() {
 		// the threshold (not just the one seen last).
 		var depthsMu sync.Mutex
 		depths := map[string]int64{}
-		obs.StartNSQDepthPollerFunc(ctx, stats, cfg.NSQDHTTPAddress, 5*time.Second, func(topic string, total int64) {
+		// Run in the background: the poller loops until ctx is done and must
+		// never block startup.
+		go obs.StartNSQDepthPollerFunc(ctx, stats, cfg.NSQDHTTPAddress, 5*time.Second, func(topic string, total int64) {
 			depthsMu.Lock()
 			depths[topic] = total
 			over := false
